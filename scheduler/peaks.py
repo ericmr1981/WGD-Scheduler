@@ -121,6 +121,96 @@ def estimate_hourly_customers(
     return hourly_distribution
 
 
+def estimate_half_hourly_customers(
+    base_daily_customers: int,
+    open_hour: int = 10,
+    close_hour: int = 22,
+    day_name: str = "周三",
+    is_holiday: bool = False,
+    peak_periods: dict | None = None,
+) -> list[dict]:
+    """
+    估算每30分钟的客流量分布
+
+    Args:
+        base_daily_customers: 日均客流量
+        open_hour: 开门时间（小时）
+        close_hour: 关门时间（小时）
+        day_name: 星期几
+        is_holiday: 是否为节假日
+        peak_periods: 自定义高峰时段，格式如 {"weekday_lunch": "12:00-14:00", ...}
+
+    Returns:
+        每30分钟客流列表
+    """
+    from datetime import datetime, timedelta
+
+    pattern = get_day_pattern(day_name, is_holiday)
+    adjusted_total = int(base_daily_customers * pattern.customer_multiplier)
+
+    # 如果提供了自定义高峰时段，覆盖默认 pattern
+    if peak_periods:
+        _apply_peak_periods(pattern, peak_periods, day_name)
+
+    # 计算各时段的加权系数
+    total_weight = 0.0
+    weights: list[tuple[int, int, float]] = []  # (start_hour, end_hour, weight)
+
+    for hour in range(open_hour, close_hour):
+        factor = 0.5  # 非高峰基准
+        for period in pattern.periods:
+            if period.start_hour <= hour < period.end_hour:
+                factor = period.multiplier
+                break
+        weights.append((hour, hour + 1, factor))
+        total_weight += factor
+
+    # 按30分钟拆分
+    result = []
+    slots = (close_hour - open_hour) * 2  # 每半小时一个 slot
+    base_per_slot = adjusted_total / total_weight / 2 if total_weight > 0 else 0
+
+    for i in range(slots):
+        hour_idx = i // 2
+        minutes = (i % 2) * 30
+        weight = weights[hour_idx][2] if hour_idx < len(weights) else 0.5
+        customers = int(base_per_slot * weight)
+
+        time_label = f"{open_hour + hour_idx:02d}:{minutes:02d}"
+        result.append({
+            "time": time_label,
+            "hour": open_hour + hour_idx + minutes / 60,
+            "customers": max(customers, 1),
+            "is_peak": weight > 0.8,
+        })
+
+    return result
+
+
+def _apply_peak_periods(
+    pattern: DayPattern,
+    peak_periods: dict,
+    day_name: str,
+) -> None:
+    """将自定义高峰时段应用到 pattern 中"""
+    is_weekend = day_name in {"周六", "周日"}
+    if is_weekend:
+        lunch = peak_periods.get("weekend_lunch", "11:00-14:00")
+        dinner = peak_periods.get("weekend_dinner", "16:00-20:00")
+    else:
+        lunch = peak_periods.get("weekday_lunch", "12:00-14:00")
+        dinner = peak_periods.get("weekday_dinner", "17:00-19:00")
+
+    def _parse_range(s: str):
+        parts = s.replace("：", ":").replace("－", "-").replace("—", "-").split("-")
+        return int(parts[0].split(":")[0]), int(parts[1].split(":")[0])
+
+    pattern.periods = [
+        PeakPeriod(*_parse_range(lunch) + ("中", 1.5)),
+        PeakPeriod(*_parse_range(dinner) + ("中", 1.5)),
+    ]
+
+
 def sum_hours(pattern: DayPattern) -> float:
     """计算模式的总加权系数（用于分布计算）"""
     total = 0.0
