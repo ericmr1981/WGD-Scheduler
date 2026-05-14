@@ -142,6 +142,12 @@ if st.button("🔨 生成排班方案", type="primary"):
 
     effective_min_staff = staffing["effective_min_staff"]
 
+    # 检测人力缺口
+    staff_shortage = effective_min_staff > employees
+
+    if staff_shortage:
+        st.error(f"⚠️ **人力不足！** 高峰需要 {effective_min_staff} 人，但只有 {employees} 人可用。缺 {effective_min_staff - employees} 人。建议：降低高峰客流预估、提高单人产能参数，或增加员工。")
+
     st.markdown("---")
     st.subheader("📊 排班分析结果")
 
@@ -208,7 +214,7 @@ if st.button("🔨 生成排班方案", type="primary"):
     week_days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
     emp_names = [f"员工{i+1}" for i in range(employees)]
 
-    rest = recommend_rest_days(emp_names, 2)
+    rest = recommend_rest_days(emp_names, 2, min_on_duty=min_on_duty, week_days=week_days)
     shifts = get_shifts()
     rotation = {emp_names[i]: ["A", "B", "C"][i % 3] for i in range(employees)}
     full_schedule = generate_weekly_schedule(emp_names, rest, shifts, rotation, week_days)
