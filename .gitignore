@@ -2,8 +2,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 .env
+.streamlit/secrets.toml
 *.db
+*.sqlite3
 .DS_Store
 .venv/
 venv/
-*.sqlite3
