@@ -62,6 +62,14 @@ default_wk_dinner = get_default("weekday_dinner_peak", "17:00-19:00")
 default_we_lunch  = get_default("weekend_lunch_peak", "11:00-14:00")
 default_we_dinner = get_default("weekend_dinner_peak", "16:00-20:00")
 
+# 工时/就餐/在岗参数
+default_opening_prep   = get_default("opening_prep_mins", 60)
+default_closing_tasks  = get_default("closing_tasks_mins", 60)
+default_meal_break     = get_default("meal_break_mins", 30)
+default_max_meals      = get_default("max_meals_per_employee", 1)
+default_target_hours   = float(get_default("target_hours_per_employee", 8.0))
+default_min_staff      = get_default("min_staff_on_duty", 1)
+
 # ─── 表单 ─────────────────────────────────────────────────────────
 
 with st.expander("🏪 门店信息", expanded=True):
@@ -112,6 +120,42 @@ with st.expander("📈 高峰时段", expanded=False):
         weekend_dinner = st.text_input("周末晚高峰", value=default_we_dinner,
                                        help="格式如 16:00-20:00")
 
+with st.expander("⏰ 工时与员工参数", expanded=False):
+    st.markdown("配置开早、打烊、就餐等营运参数，排班时会自动计算。")
+    col1, col2 = st.columns(2)
+    with col1:
+        opening_prep = st.number_input(
+            "开早所需时间（分钟）", min_value=0, max_value=180,
+            value=default_opening_prep, step=5,
+            help="开店前准备所需时间"
+        )
+        meal_break = st.number_input(
+            "工作餐时间（分钟）", min_value=0, max_value=120,
+            value=default_meal_break, step=5,
+            help="每班次就餐时间，不计入8小时工时"
+        )
+        target_hours = st.number_input(
+            "每位员工目标工时（小时/天）", min_value=1.0, max_value=12.0,
+            value=default_target_hours, step=0.5,
+            help="每位员工每天目标工作小时数（不含就餐时间）"
+        )
+    with col2:
+        closing_tasks = st.number_input(
+            "打烊所需时间（分钟）", min_value=0, max_value=180,
+            value=default_closing_tasks, step=5,
+            help="打烊后收尾所需时间"
+        )
+        max_meals = st.number_input(
+            "每位员工每日最大就餐次数", min_value=0, max_value=3,
+            value=default_max_meals,
+            help="每位员工每天最多可以安排几次就餐"
+        )
+        min_on_duty = st.number_input(
+            "最低在岗人数", min_value=1, max_value=20,
+            value=default_min_staff,
+            help="任何时间至少保持的在岗人数（安全底线）"
+        )
+
 # ─── 保存 ─────────────────────────────────────────────────────────
 
 if st.button("💾 保存配置", type="primary"):
@@ -128,6 +172,12 @@ if st.button("💾 保存配置", type="primary"):
         "weekday_dinner_peak": week_dinner,
         "weekend_lunch_peak": weekend_lunch,
         "weekend_dinner_peak": weekend_dinner,
+        "opening_prep_mins": opening_prep,
+        "closing_tasks_mins": closing_tasks,
+        "meal_break_mins": meal_break,
+        "max_meals_per_employee": max_meals,
+        "target_hours_per_employee": target_hours,
+        "min_staff_on_duty": min_on_duty,
     }
 
     try:
@@ -164,6 +214,12 @@ if st.button("💾 保存配置", type="primary"):
                 "weekend_lunch": weekend_lunch,
                 "weekend_dinner": weekend_dinner,
             },
+            "opening_prep_mins": opening_prep,
+            "closing_tasks_mins": closing_tasks,
+            "meal_break_mins": meal_break,
+            "max_meals_per_employee": max_meals,
+            "target_hours_per_employee": target_hours,
+            "min_staff_on_duty": min_on_duty,
         }
         st.session_state["store_id"] = store_id
     except Exception as e:

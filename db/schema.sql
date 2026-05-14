@@ -16,6 +16,12 @@ CREATE TABLE IF NOT EXISTS stores (
     weekday_dinner_peak TEXT NOT NULL DEFAULT '17:00-19:00',
     weekend_lunch_peak TEXT NOT NULL DEFAULT '11:00-14:00',
     weekend_dinner_peak TEXT NOT NULL DEFAULT '16:00-20:00',
+    opening_prep_mins INTEGER NOT NULL DEFAULT 60,
+    closing_tasks_mins INTEGER NOT NULL DEFAULT 60,
+    meal_break_mins INTEGER NOT NULL DEFAULT 30,
+    max_meals_per_employee INTEGER NOT NULL DEFAULT 1,
+    target_hours_per_employee NUMERIC(4,1) NOT NULL DEFAULT 8.0,
+    min_staff_on_duty INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

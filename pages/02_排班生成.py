@@ -1,10 +1,10 @@
 """
-排班生成页 — 支持客流分布图（30min颗粒度）+ 每日排班明细表
+排班生成页 — 支持客流分布图（30min颗粒度）+ 每日排班明细表 + 营运参数分析
 """
 
 import streamlit as st
 import pandas as pd
-from scheduler.core import calculate_min_staff
+from scheduler.core import calculate_min_staff, calculate_staffing_requirements
 from scheduler.shifts import get_shifts, generate_weekly_schedule, get_hourly_coverage
 from scheduler.rest_days import recommend_rest_days, validate_coverage
 from scheduler.peaks import estimate_half_hourly_customers
@@ -38,6 +38,12 @@ if not config:
                     "weekend_lunch": s.get("weekend_lunch_peak", "11:00-14:00"),
                     "weekend_dinner": s.get("weekend_dinner_peak", "16:00-20:00"),
                 },
+                "opening_prep_mins": s.get("opening_prep_mins", 60),
+                "closing_tasks_mins": s.get("closing_tasks_mins", 60),
+                "meal_break_mins": s.get("meal_break_mins", 30),
+                "max_meals_per_employee": s.get("max_meals_per_employee", 1),
+                "target_hours_per_employee": float(s.get("target_hours_per_employee", 8.0)),
+                "min_staff_on_duty": s.get("min_staff_on_duty", 1),
             }
             st.session_state["store_config"] = config
             st.session_state["store_id"] = s["id"]
@@ -45,7 +51,12 @@ if not config:
         pass
 
 if config:
-    st.info(f"🏪 当前门店：{config['name']} | 员工数：{config['employees']} 人 | 单人产能：{config['productivity']} 单/h")
+    st.info(
+        f"🏪 **{config['name']}** "
+        f"| 员工 {config['employees']} 人 "
+        f"| 产能 {config['productivity']} 单/h "
+        f"| 营业 {config.get('peak_periods',{}).get('weekday_lunch','12:00-14:00').split('-')[0]}:00~{config.get('peak_periods',{}).get('weekend_dinner','16:00-20:00').split('-')[1]}:00"
+    )
 else:
     st.warning("⚠️ 尚未配置门店信息，请先在「门店配置」页面填写并保存。")
 
@@ -70,7 +81,6 @@ with st.expander("📥 本周客流预估", expanded=True):
 
 st.markdown("### 📊 日客流分布图（30分钟颗粒度）")
 
-# 取周三作为平日参考
 peak_periods = config.get("peak_periods") if config else None
 
 weekday_dist = estimate_half_hourly_customers(
@@ -93,7 +103,6 @@ st.bar_chart(
 )
 st.caption("平日以周三为例，周末以周六为例，30分钟颗粒度")
 
-# 显示高峰时段标记
 if peak_periods:
     cols = st.columns(2)
     with cols[0]:
@@ -108,25 +117,90 @@ st.markdown("---")
 if st.button("🔨 生成排班方案", type="primary"):
     min_staff = calculate_min_staff(peak_input, productivity)
 
+    # 读取营运参数（从 config 或默认值）
+    open_hour = 10
+    close_hour = 22
+    opening_prep = config.get("opening_prep_mins", 60) if config else 60
+    closing_tasks = config.get("closing_tasks_mins", 60) if config else 60
+    meal_break = config.get("meal_break_mins", 30) if config else 30
+    max_meals = config.get("max_meals_per_employee", 1) if config else 1
+    target_hours = config.get("target_hours_per_employee", 8.0) if config else 8.0
+    min_on_duty = config.get("min_staff_on_duty", 1) if config else 1
+
+    staffing = calculate_staffing_requirements(
+        open_hour=open_hour,
+        close_hour=close_hour,
+        opening_prep_mins=opening_prep,
+        closing_tasks_mins=closing_tasks,
+        meal_break_mins=meal_break,
+        max_meals_per_employee=max_meals,
+        target_hours_per_employee=target_hours,
+        min_staff_on_duty=min_on_duty,
+        peak_min_staff=min_staff,
+        employee_count=employees,
+    )
+
+    effective_min_staff = staffing["effective_min_staff"]
+
     st.markdown("---")
     st.subheader("📊 排班分析结果")
 
+    # ─── 核心指标 ──────────────────────────────────────────────────
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("高峰需求人数", f"{min_staff} 人",
+                  help="由产能公式算出：⌈高峰客流÷单人产能⌉")
+    with col2:
+        st.metric("最低在岗底线", f"{min_on_duty} 人",
+                  help="门店配置中设定的安全底线")
+    with col3:
+        st.metric("实际执行最低人数", f"{effective_min_staff} 人",
+                  help="取「高峰需求」和「最低在岗底线」的较大值")
+    with col4:
+        st.metric("可用员工数", f"{employees} 人")
+
+    # ─── 工时分析 ──────────────────────────────────────────────────
+    st.markdown("### ⏱ 工时分析")
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("最低同时在岗人数", f"{min_staff} 人")
+        st.metric("每班目标工时", f"{target_hours}h",
+                  help="不含就餐时间的纯工时")
+        st.metric("每餐时间", f"{meal_break}min",
+                  help="就餐时间不计入工时")
+        st.metric("班次总跨度", f'{staffing["effective_shift_hours"]}h',
+                  help=f"目标工时+就餐时间，即员工到店总时长")
     with col2:
-        st.metric("可用员工总数", f"{employees} 人")
+        st.metric("门店每日总跨度", f'{staffing["daily_span_hours"]}h',
+                  help=f"营业时长+开早{opening_prep}min+打烊{closing_tasks}min")
+        st.metric("开早占用", f'{staffing["opening_staff_needed"]} 人',
+                  help=f"开早需{opening_prep}分钟，至少1人提前到店")
+        st.metric("打烊占用", f'{staffing["closing_staff_needed"]} 人',
+                  help=f"打烊需{closing_tasks}分钟，至少1人延后离店")
     with col3:
-        st.metric("单人产能", f"{productivity} 单/h")
+        st.metric("全员每日可用工时", f'{staffing["total_staff_hours_per_day"]}h',
+                  help=f"{employees}人 × {target_hours}h/人")
+        st.metric("每日最低需求工时", f'{staffing["needed_hours"]}h',
+                  help=f"营业时长({close_hour - open_hour}h) × {effective_min_staff}人")
+        delta = "✅" if staffing["staff_sufficient"] else "⚠️"
+        st.metric("人力充足", delta,
+                  help="可用工时 ≥ 需求工时即为充足")
 
-    # 排班结构说明
-    st.markdown("### 🕐 推荐班次结构")
-    st.markdown("""
-    | 班次 | 时间 | 时长 | 覆盖特点 |
-    |------|------|------|----------|
-    | **A 班** | 10:00-18:00 | 8h | 开店+午高峰 |
-    | **B 班** | 12:00-20:00 | 8h | 午高峰+晚高峰 |
-    | **C 班** | 14:00-22:00 | 8h | 晚高峰+打烊 |
+    st.markdown("---")
+
+    # ─── 班次结构说明（含开早/打烊/就餐）───────────────────────────
+    st.markdown("### 🕐 班次结构（含开早/打烊/就餐）")
+    prep_h = opening_prep / 60
+    close_h = closing_tasks / 60
+    meal_h = meal_break / 60
+    st.markdown(f"""
+    | 时段 | 时间 | 说明 |
+    |------|------|------|
+    | **开早准备** | {open_hour - prep_h:.0f}:00~{open_hour}:00 | 至少{staffing["opening_staff_needed"]}人提前{opening_prep}分钟到店 |
+    | **营业时间** | {open_hour}:00~{close_hour}:00 | 正式营业，共 {close_hour - open_hour}h |
+    | **打烊收尾** | {close_hour}:00~{close_hour + close_h:.0f}:00 | 至少{staffing["closing_staff_needed"]}人延后{closing_tasks}分钟离店 |
+    | **班次 A** | {open_hour}:00~{open_hour + 8:.0f}:00（含{meal_break}min就餐） | 覆盖开店+午高峰 |
+    | **班次 B** | {open_hour + 2}:00~{open_hour + 10}:00（含{meal_break}min就餐） | 覆盖午高峰+晚高峰 |
+    | **班次 C** | {open_hour + 4}:00~{close_hour}:00（含{meal_break}min就餐） | 覆盖晚高峰+打烊 |
     """)
 
     # ─── 生成排班表 ───────────────────────────────────────────────
@@ -150,12 +224,12 @@ if st.button("🔨 生成排班方案", type="primary"):
     for i, day in enumerate(week_days):
         with cols[i]:
             count = coverage.get(day, 0)
-            st.metric(day, f"{count} 人", delta="✅" if count >= min_staff else "⚠️")
+            st.metric(day, f"{count} 人", delta="✅" if count >= effective_min_staff else "⚠️")
 
     # ─── 每日排班明细表 ───────────────────────────────────────────
     st.markdown("### 📋 每日排班明细表")
 
-    # 构建排班矩阵：行为员工，列为日期
+    # 构造排班矩阵：行为员工，列为日期
     table_data = {}
     for day in week_days:
         day_col = []
@@ -164,10 +238,9 @@ if st.button("🔨 生成排班方案", type="primary"):
             if shift is None:
                 day_col.append("休息")
             else:
-                # 查找班次时间
                 shift_obj = next((s for s in shifts if s.name == shift), None)
                 if shift_obj:
-                    day_col.append(f"{shift} 班 ({shift_obj.start}:00-{shift_obj.end}:00)")
+                    day_col.append(f"{shift} 班\n({shift_obj.start}:00-{shift_obj.end}:00)")
                 else:
                     day_col.append(f"{shift} 班")
         table_data[day] = day_col
@@ -196,9 +269,9 @@ if st.button("🔨 生成排班方案", type="primary"):
     hourly = get_hourly_coverage(full_schedule, shifts, "周三")
     st.session_state["schedule_result"] = {
         "hourly_coverage": hourly,
-        "min_required": min_staff,
+        "min_required": effective_min_staff,
         "peak_hours": [12, 13, 17, 18],
-        "min_staff": min_staff,
+        "min_staff": effective_min_staff,
         "employees": employees,
     }
 
