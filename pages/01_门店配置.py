@@ -123,11 +123,17 @@ with st.expander("🏪 门店信息", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
         store_name = st.text_input("门店名称", value=default_name)
-        open_h, close_h = st.slider(
-            "营业时间", 6.0, 24.0, 0.5,
-            value=(default_open, default_close),
-            format="%.1f"
+        time_opts = [f"{h:02d}:{m:02d}" for h in range(6, 24) for m in (0, 30)]
+        def_idx = time_opts.index(f"{int(default_open):02d}:{int(default_open%1*60):02d}") if default_open else 8
+        close_idx = time_opts.index(f"{int(default_close):02d}:{int(default_close%1*60):02d}") if default_close else 32
+        open_str, close_str = st.select_slider(
+            "营业时间", options=time_opts,
+            value=(time_opts[def_idx], time_opts[close_idx]),
         )
+        h1, m1 = open_str.split(":")
+        h2, m2 = close_str.split(":")
+        open_h = int(h1) + int(m1) / 60
+        close_h = int(h2) + int(m2) / 60
     with col2:
         employee_count = st.number_input(
             "员工人数", min_value=1, max_value=50, value=default_emp
