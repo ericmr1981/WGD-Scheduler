@@ -72,9 +72,12 @@ def _build_client() -> Optional[Client]:
 
     if url and key:
         try:
-            return create_client(url, key)
+            client = create_client(url, key)
+            # 验证凭据是否有效（create_client 不会校验，需发一次请求）
+            client.table("stores").select("id").limit(1).execute()
+            return client
         except Exception as e:
-            warnings.warn(f"Supabase 客户端创建失败: {e}")
+            warnings.warn(f"Supabase 连接失败 (key 无效或项目不可达): {e}")
 
     return None
 
