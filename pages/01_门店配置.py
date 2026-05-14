@@ -2,20 +2,65 @@
 门店配置页 — 带 Supabase 持久化
 """
 
+import os
+import json
 import streamlit as st
-from db.supabase_client import get_stores, create_store, update_store, get_client
+from urllib.request import Request, urlopen
+from db.supabase_client import get_stores, create_store, update_store, get_client, get_backend_name
 
 st.set_page_config(page_title="门店配置", page_icon="📊")
 
 st.title("📊 门店配置")
 st.markdown("设置门店基本参数，数据保存在云端，刷新不会丢失。")
 
-# ─── Supabase 连接状态 ────────────────────────────────────────────
-client = get_client()
-if client is None:
-    st.warning("⚠️ Supabase 未连接，数据将仅在当前会话中生效，刷新后丢失。请检查 Supabase 配置。")
-else:
-    st.info("✅ Supabase 已连接，数据将持久保存到云端。")
+# ─── Supabase 连接状态诊断 ──────────────────────────────────────
+col1, col2 = st.columns([3, 1])
+with col1:
+    client = get_client()
+    if client is not None:
+        st.info(f"✅ Supabase 已连接（{get_backend_name()}），数据将持久保存到云端。")
+    else:
+        # 诊断：检查配置是否存在
+        supabase_url = ""
+        supabase_key = ""
+        try:
+            supabase_url = st.secrets.get("SUPABASE_URL", "") or st.secrets.get("supabase", {}).get("url", "")
+        except Exception:
+            pass
+        try:
+            supabase_key = st.secrets.get("SUPABASE_ANON_KEY", "") or st.secrets.get("supabase", {}).get("anon_key", "")
+        except Exception:
+            pass
+        if not supabase_url:
+            supabase_url = os.environ.get("SUPABASE_URL", "")
+        if not supabase_key:
+            supabase_key = os.environ.get("SUPABASE_ANON_KEY", "") or os.environ.get("SUPABASE_KEY", "")
+
+        if not supabase_url:
+            st.error("❌ 未找到 SUPABASE_URL 配置")
+        elif not supabase_key:
+            st.error("❌ 未找到 SUPABASE_ANON_KEY 配置")
+        else:
+            # 有配置但连接失败，测试 HTTP 直连
+            st.warning("⚠️ SDK 连接失败，正在测试 HTTP 直连…")
+            try:
+                req = Request(
+                    f"{supabase_url.rstrip('/')}/rest/v1/stores",
+                    headers={
+                        "apikey": supabase_key,
+                        "Authorization": f"Bearer {supabase_key}",
+                    },
+                )
+                with urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode())
+                    st.success(f"✅ HTTP 直连成功！返回 {len(data)} 条数据。可正常使用。")
+            except Exception as e:
+                st.error(f"❌ HTTP 直连也失败: {e}")
+
+with col2:
+    if st.button("🔄 重试连接"):
+        st.cache_data.clear()
+        st.rerun()
 
 # ─── 加载已有配置 ────────────────────────────────────────────────
 
