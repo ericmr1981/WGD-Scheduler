@@ -120,7 +120,7 @@ if st.button("💾 保存配置", type="primary"):
             created = create_store(store_data)
             if not created:
                 st.error("❌ 保存失败，请检查 Supabase 配置是否正确")
-                return
+                st.stop()
             store_id = created.get("id")
             st.success("✅ 配置已保存到云！")
 
