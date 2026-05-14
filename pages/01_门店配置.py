@@ -86,9 +86,10 @@ def get_default(key, default):
     return default
 
 def parse_hour(time_str, default):
-    """从 '10:00' 格式提取小时数。"""
+    """从 '10:00' 或 '10:30' 格式提取小时数（float，30分钟颗粒度）。"""
     if isinstance(time_str, str) and ":" in time_str:
-        return int(time_str.split(":")[0])
+        h, m = time_str.split(":")
+        return int(h) + int(m) / 60
     return default
 
 default_open = parse_hour(get_default("open_time", None), 10)
@@ -123,8 +124,9 @@ with st.expander("🏪 门店信息", expanded=True):
     with col1:
         store_name = st.text_input("门店名称", value=default_name)
         open_h, close_h = st.slider(
-            "营业时间", 6, 24,
-            value=(default_open, default_close)
+            "营业时间", 6.0, 24.0, 0.5,
+            value=(default_open, default_close),
+            format="%.1f"
         )
     with col2:
         employee_count = st.number_input(
@@ -207,8 +209,8 @@ with st.expander("⏰ 工时与员工参数", expanded=False):
 if st.button("💾 保存配置", type="primary"):
     store_data = {
         "name": store_name,
-        "open_time": f"{open_h:02d}:00",
-        "close_time": f"{close_h:02d}:00",
+        "open_time": f"{int(open_h):02d}:{int(open_h % 1 * 60):02d}",
+        "close_time": f"{int(close_h):02d}:{int(close_h % 1 * 60):02d}",
         "employee_count": employee_count,
         "service_type": service_type,
         "productivity_per_hour": productivity,

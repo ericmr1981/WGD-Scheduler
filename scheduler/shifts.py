@@ -8,12 +8,12 @@ from dataclasses import dataclass
 
 @dataclass
 class Shift:
-    """班次定义"""
-    name: str           # A / B / C
-    start: int          # 开始小时
-    end: int            # 结束小时
-    duration: int       # 持续小时数
-    peak_coverage: bool  # 是否覆盖高峰
+    """班次定义，支持 30 分钟颗粒度（如 9.5 = 9:30）"""
+    name: str
+    start: float          # 开始小时（如 9.0, 10.5）
+    end: float            # 结束小时
+    duration: float       # 持续小时数
+    peak_coverage: bool
 
 
 # 标准三班制（10:00-22:00 营业场景）
@@ -25,21 +25,10 @@ STANDARD_SHIFTS = [
 
 
 def get_shifts(
-    a_start: int = 10, a_end: int = 18,
-    b_start: int = 12, b_end: int = 20,
-    c_start: int = 14, c_end: int = 22,
+    a_start: float = 10.0, a_end: float = 18.0,
+    b_start: float = 12.0, b_end: float = 20.0,
+    c_start: float = 14.0, c_end: float = 22.0,
 ) -> List[Shift]:
-    """
-    返回班次列表，支持自定义各班组时间。
-
-    Args:
-        a_start / a_end: A 班起止小时
-        b_start / b_end: B 班起止小时
-        c_start / c_end: C 班起止小时
-
-    Returns:
-        [Shift_A, Shift_B, Shift_C]
-    """
     return [
         Shift(name="A", start=a_start, end=a_end, duration=a_end - a_start, peak_coverage=True),
         Shift(name="B", start=b_start, end=b_end, duration=b_end - b_start, peak_coverage=True),
@@ -47,56 +36,49 @@ def get_shifts(
     ]
 
 
+def _round_half(v: float) -> float:
+    """四舍五入到最近的 0.5（30 分钟）"""
+    return round(v * 2) / 2
+
+
 def calculate_shifts(
-    open_hour: int = 10,
-    close_hour: int = 22,
+    open_hour: float = 10.0,
+    close_hour: float = 22.0,
     opening_prep_mins: int = 60,
     closing_tasks_mins: int = 60,
     meal_break_mins: int = 60,
     target_hours: float = 8.0,
 ) -> List[Shift]:
     """
-    根据营运参数自动计算 A/B/C 班次时间。
+    根据营运参数自动计算 A/B/C 班次时间（30 分钟颗粒度）。
 
     公式：
       shift_duration = target_hours + meal_break / 60
       A: 从 (open - prep) 开始，持续 duration
       C: 到 (close + closing_tasks) 结束，持续 duration
-      B: A 和 C 正中间 + rounding
-
-    Args:
-        open_hour: 营业开始小时
-        close_hour: 营业结束小时
-        opening_prep_mins: 开早分钟数
-        closing_tasks_mins: 打烊分钟数
-        meal_break_mins: 每餐分钟数
-        target_hours: 目标工时
+      B: A 和 C 正中间
 
     Returns:
         [Shift_A, Shift_B, Shift_C]
     """
-    duration = target_hours + meal_break_mins / 60  # e.g. 8+1=9h
+    duration = target_hours + meal_break_mins / 60
 
-    a_start_f = open_hour - opening_prep_mins / 60
-    a_end_f = a_start_f + duration
+    a_start = open_hour - opening_prep_mins / 60
+    a_end = a_start + duration
 
-    c_end_f = close_hour + closing_tasks_mins / 60
-    c_start_f = c_end_f - duration
+    c_end = close_hour + closing_tasks_mins / 60
+    c_start = c_end - duration
 
-    b_start_f = (a_start_f + c_start_f) / 2
-    b_end_f = b_start_f + duration
-
-    # 四舍五入到整点
-    def _r(v: float) -> int:
-        return int(round(v))
+    b_start = (a_start + c_start) / 2
+    b_end = b_start + duration
 
     return [
-        Shift(name="A", start=_r(a_start_f), end=_r(a_end_f),
-              duration=_r(duration), peak_coverage=True),
-        Shift(name="B", start=_r(b_start_f), end=_r(b_end_f),
-              duration=_r(duration), peak_coverage=True),
-        Shift(name="C", start=_r(c_start_f), end=_r(c_end_f),
-              duration=_r(duration), peak_coverage=False),
+        Shift(name="A", start=_round_half(a_start), end=_round_half(a_end),
+              duration=duration, peak_coverage=True),
+        Shift(name="B", start=_round_half(b_start), end=_round_half(b_end),
+              duration=duration, peak_coverage=True),
+        Shift(name="C", start=_round_half(c_start), end=_round_half(c_end),
+              duration=duration, peak_coverage=False),
     ]
 
 
@@ -162,42 +144,40 @@ def generate_weekly_schedule(
     return schedule
 
 
-def get_hourly_coverage(
+def get_half_hourly_coverage(
     schedule: Dict[str, Dict[str, Optional[str]]],
     shifts: List[Shift],
     day: str,
-) -> List[int]:
+) -> list[dict]:
     """
-    计算某天每个小时的在岗人数
-
-    Args:
-        schedule: 排班表
-        shifts: 班次定义
-        day: 星期几
+    计算某天每 30 分钟的在岗人数。
 
     Returns:
-        每小时在岗人数列表 [人数(hour=10), ..., 人数(hour=21)]
+        [{"time": "09:00", "staff": 1}, {"time": "09:30", "staff": 1}, ...]
     """
     if not shifts:
         return []
     cov_start = min(s.start for s in shifts)
     cov_end = max(s.end for s in shifts)
-    cov_hours = cov_end - cov_start
-    hourly = [0] * cov_hours
+    n_slots = int((cov_end - cov_start) * 2)
+    coverage = [0] * n_slots
     shift_map = {s.name: s for s in shifts}
 
     for emp, days in schedule.items():
         shift_name = days.get(day)
         if shift_name is None:
             continue
-
         shift = shift_map.get(shift_name)
         if shift is None:
             continue
+        for slot in range(int(shift.start * 2), int(shift.end * 2)):
+            idx = slot - int(cov_start * 2)
+            if 0 <= idx < n_slots:
+                coverage[idx] += 1
 
-        for h in range(shift.start, shift.end):
-            idx = h - cov_start
-            if 0 <= idx < cov_hours:
-                hourly[idx] += 1
-
-    return hourly
+    result = []
+    for i, c in enumerate(coverage):
+        total_minutes = int((cov_start * 60) + i * 30)
+        h, m = divmod(total_minutes, 60)
+        result.append({"time": f"{h:02d}:{m:02d}", "staff": c})
+    return result

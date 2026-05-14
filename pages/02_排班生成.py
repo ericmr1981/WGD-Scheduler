@@ -5,7 +5,7 @@
 import streamlit as st
 import pandas as pd
 from scheduler.core import calculate_min_staff, calculate_staffing_requirements
-from scheduler.shifts import calculate_shifts, get_hourly_coverage
+from scheduler.shifts import calculate_shifts, get_half_hourly_coverage
 from scheduler.rest_days import recommend_rest_days, validate_coverage
 from scheduler.peaks import estimate_half_hourly_customers
 from db.supabase_client import get_stores
@@ -14,6 +14,10 @@ st.set_page_config(page_title="排班生成", page_icon="📋")
 
 st.title("📋 排班生成")
 st.markdown("输入日均客流量，自动生成30分钟颗粒度客流分布图和排班方案。")
+
+# 时间格式化辅助：10.5 → "10:30"
+def _fmt(h: float) -> str:
+    return f"{int(h):02d}:{int(h % 1 * 60):02d}"
 
 # ─── 从 Supabase / session_state 加载配置 ────────────────────────
 
@@ -55,7 +59,7 @@ if config:
         f"🏪 **{config['name']}** "
         f"| 员工 {config['employees']} 人 "
         f"| 产能 {config['productivity']} 单/h "
-        f"| 营业 {config.get('peak_periods',{}).get('weekday_lunch','12:00-14:00').split('-')[0]}:00~{config.get('peak_periods',{}).get('weekend_dinner','16:00-20:00').split('-')[1]}:00"
+        f"| 营业 10:00~22:00"
     )
 else:
     st.warning("⚠️ 尚未配置门店信息，请先在「门店配置」页面填写并保存。")
@@ -118,8 +122,8 @@ if st.button("🔨 生成排班方案", type="primary"):
     min_staff = calculate_min_staff(peak_input, productivity)
 
     # 读取营运参数（从 config 或默认值）
-    open_hour = 10
-    close_hour = 22
+    open_hour = 10.0
+    close_hour = 22.0
     opening_prep = config.get("opening_prep_mins", 60) if config else 60
     closing_tasks = config.get("closing_tasks_mins", 60) if config else 60
     meal_break = config.get("meal_break_mins", 30) if config else 30
@@ -210,12 +214,12 @@ if st.button("🔨 生成排班方案", type="primary"):
     st.markdown(f"""
     | 时段 | 时间 | 说明 |
     |------|------|------|
-    | **开早准备** | {a_s}:00~{open_hour}:00 | A 班到店做开早准备 |
-    | **营业时间** | {open_hour}:00~{close_hour}:00 | 正式营业，共 {close_hour - open_hour}h |
-    | **打烊收尾** | {close_hour}:00~{c_e}:00 | C 班延后做打烊收尾 |
-    | **班次 A** | {a_s}:00~{a_e}:00（{shift_dur}h，含餐{meal_break}min） | 开早准备+开店+午高峰 |
-    | **班次 B** | {b_s}:00~{b_e}:00（{shift_dur}h，含餐{meal_break}min） | 午高峰+晚高峰 |
-    | **班次 C** | {c_s}:00~{c_e}:00（{shift_dur}h，含餐{meal_break}min） | 晚高峰+打烊收尾 |
+    | **开早准备** | {_fmt(a_s)}~{_fmt(open_hour)} | A 班到店做开早准备 |
+    | **营业时间** | {_fmt(open_hour)}~{_fmt(close_hour)} | 正式营业，共 {close_hour - open_hour}h |
+    | **打烊收尾** | {_fmt(close_hour)}~{_fmt(c_e)} | C 班延后做打烊收尾 |
+    | **班次 A** | {_fmt(a_s)}~{_fmt(a_e)}（{shift_dur:.1f}h，含餐{meal_break}min） | 开早准备+开店+午高峰 |
+    | **班次 B** | {_fmt(b_s)}~{_fmt(b_e)}（{shift_dur:.1f}h，含餐{meal_break}min） | 午高峰+晚高峰 |
+    | **班次 C** | {_fmt(c_s)}~{_fmt(c_e)}（{shift_dur:.1f}h，含餐{meal_break}min） | 晚高峰+打烊收尾 |
     """)
 
     # ─── 生成排班表 ───────────────────────────────────────────────
@@ -268,28 +272,33 @@ if st.button("🔨 生成排班方案", type="primary"):
     if not consecutive_issue:
         st.caption("✅ 无连续休息")
 
-    # 验证：每小时在岗（使用实际班次时间范围）
+    # 验证：每30分钟在岗
     cov_start = min(s.start for s in shifts)
     cov_end = max(s.end for s in shifts)
-    cov_hours = cov_end - cov_start
-    st.markdown(f"### 🔍 每小时在岗验证（{cov_start}:00-{cov_end}:00）")
+    n_slots = int((cov_end - cov_start) * 2)
+    st.markdown(f"### 🔍 每30分钟在岗验证（{_fmt(cov_start)}~{_fmt(cov_end)}）")
     all_covered = True
     for day in week_days:
-        hourly = [0] * cov_hours
+        coverage = [0] * n_slots
         for emp in emp_names:
             sn = schedule_by_emp[emp][day]
             if sn is None:
                 continue
             s = shift_map.get(sn)
             if s:
-                for h in range(s.start, s.end):
-                    idx = h - cov_start
-                    if 0 <= idx < cov_hours:
-                        hourly[idx] += 1
-        zero = [cov_start + i for i, c in enumerate(hourly) if c == 0]
-        mn = min(hourly) if hourly else 0
-        if zero:
-            st.warning(f"  {day} ⚠️ 最低{mn}人 | 无人时段: {', '.join(f'{h}' for h in zero)}:00")
+                for sl in range(int(s.start * 2), int(s.end * 2)):
+                    idx = sl - int(cov_start * 2)
+                    if 0 <= idx < n_slots:
+                        coverage[idx] += 1
+        mn = min(coverage) if coverage else 0
+        zero_slots = [sl for sl, c in enumerate(coverage) if c == 0]
+        zero_times = []
+        for sl in zero_slots:
+            total_minutes = int((cov_start * 60) + sl * 30)
+            h, m = divmod(total_minutes, 60)
+            zero_times.append(f"{h:02d}:{m:02d}")
+        if zero_times:
+            st.warning(f"  {day} ⚠️ 最低{mn}人 | 无人: {', '.join(zero_times)}")
             all_covered = False
         else:
             st.markdown(f"  {day} ✅ 最低{mn}人")
@@ -308,7 +317,7 @@ if st.button("🔨 生成排班方案", type="primary"):
                 day_col.append("休息")
             else:
                 s = shift_map.get(sn)
-                day_col.append(f"{sn}班\n({s.start}:00-{s.end}:00)" if s else f"{sn}班")
+                day_col.append(f"{sn}班\n({_fmt(s.start)}-{_fmt(s.end)})" if s else f"{sn}班")
         table_data[day] = day_col
 
     df_schedule = pd.DataFrame(table_data, index=emp_names)
@@ -328,14 +337,14 @@ if st.button("🔨 生成排班方案", type="primary"):
                 parts.append(f"休息：{'、'.join(v)}")
             else:
                 s = shift_map.get(k)
-                ts = f"({s.start}:00-{s.end}:00)" if s else ""
+                ts = f"({_fmt(s.start)}-{_fmt(s.end)})" if s else ""
                 parts.append(f"{k}班{ts}：{'、'.join(v)}")
         st.markdown(f"**{day}** | {' | '.join(parts)}")
 
-    # ─── 每小时覆盖（传排班检查页）────────────────────────────────
-    hourly = get_hourly_coverage(schedule_by_emp, shifts, "周三")
+    # ─── 覆盖数据（传排班检查页）──────────────────────────────────
+    half_hourly = get_half_hourly_coverage(schedule_by_emp, shifts, "周三")
     st.session_state["schedule_result"] = {
-        "hourly_coverage": hourly,
+        "half_hourly_coverage": half_hourly,
         "min_required": effective_min_staff,
         "peak_hours": [12, 13, 17, 18],
         "min_staff": effective_min_staff,

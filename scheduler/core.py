@@ -97,8 +97,8 @@ def analyze_gap(
 
 
 def calculate_staffing_requirements(
-    open_hour: int,
-    close_hour: int,
+    open_hour: float,
+    close_hour: float,
     opening_prep_mins: int,
     closing_tasks_mins: int,
     meal_break_mins: int,
