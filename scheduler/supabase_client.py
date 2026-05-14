@@ -36,8 +36,29 @@ class _JSONEncoder(json.JSONEncoder):
 _SUPABASE_AVAILABLE = False
 _supabase = None
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+SUPABASE_URL = ""
+SUPABASE_KEY = ""
+
+# 1. Streamlit secrets（Cloud 部署）
+try:
+    import streamlit as st
+    SUPABASE_URL = (
+        st.secrets.get("SUPABASE_URL", "")
+        or st.secrets.get("supabase", {}).get("url", "")
+    )
+    SUPABASE_KEY = (
+        st.secrets.get("SUPABASE_ANON_KEY", "")
+        or st.secrets.get("supabase", {}).get("anon_key", "")
+        or st.secrets.get("SUPABASE_KEY", "")
+    )
+except Exception:
+    pass
+
+# 2. 环境变量（本地开发）
+if not SUPABASE_URL:
+    SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+if not SUPABASE_KEY:
+    SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "") or os.environ.get("SUPABASE_ANON_KEY", "")
 
 if SUPABASE_URL and SUPABASE_KEY:
     try:
