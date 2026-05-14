@@ -60,6 +60,24 @@ CREATE TABLE IF NOT EXISTS weekly_reviews (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ─── Row Level Security（公开读写，MVP 阶段够用）───────────
+-- 如需后续接入 Supabase Auth，再改为 authenticated 策略
+
+ALTER TABLE stores ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_read_write" ON stores FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_read_write" ON employees FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE schedules ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_read_write" ON schedules FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE schedule_shifts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_read_write" ON schedule_shifts FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE weekly_reviews ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "public_read_write" ON weekly_reviews FOR ALL USING (true) WITH CHECK (true);
+
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_employees_store ON employees(store_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_store ON schedules(store_id);

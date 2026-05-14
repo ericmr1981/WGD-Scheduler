@@ -111,10 +111,16 @@ if st.button("💾 保存配置", type="primary"):
 
     try:
         if store_id:
-            update_store(store_id, store_data)
-            st.success("✅ 配置已更新到云！")
+            result = update_store(store_id, store_data)
+            if not result:
+                st.error("❌ 更新失败，请检查 Supabase 配置是否正确")
+            else:
+                st.success("✅ 配置已更新到云！")
         else:
             created = create_store(store_data)
+            if not created:
+                st.error("❌ 保存失败，请检查 Supabase 配置是否正确")
+                return
             store_id = created.get("id")
             st.success("✅ 配置已保存到云！")
 
