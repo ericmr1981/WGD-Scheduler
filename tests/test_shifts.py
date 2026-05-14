@@ -6,7 +6,7 @@ from scheduler.shifts import (
     get_shifts,
     rotate_shifts,
     generate_weekly_schedule,
-    get_hourly_coverage,
+    get_half_hourly_coverage,
 )
 
 
@@ -30,7 +30,6 @@ class TestRotateShifts:
     def test_basic_rotation(self):
         current = {"张三": "A", "李四": "B", "王五": "C"}
         result = rotate_shifts(current, week_number=1)
-        # rotation = 1 % 3 = 1, so shift by 1
         employees = list(current.keys())
         assert result[employees[0]] == "B"  # A → B
         assert result[employees[1]] == "C"  # B → C
@@ -42,7 +41,6 @@ class TestRotateShifts:
         assert result == current
 
     def test_full_cycle(self):
-        """After 3 weeks, should return to original"""
         current = {"张三": "A", "李四": "B", "王五": "C"}
         after_3 = rotate_shifts(current, week_number=3)
         assert after_3 == current
@@ -60,10 +58,7 @@ class TestGenerateWeeklySchedule:
 
         assert "张三" in schedule
         assert "李四" in schedule
-
-        # 张三休息周二
         assert schedule["张三"]["周二"] is None
-        # 张三其他天是A班
         assert schedule["张三"]["周一"] == "A"
 
     def test_rest_days_respected(self):
@@ -78,28 +73,47 @@ class TestGenerateWeeklySchedule:
             assert schedule["张三"][day] is None
 
 
-class TestGetHourlyCoverage:
+class TestGetHalfHourlyCoverage:
     def test_single_employee(self):
         schedule = {
             "张三": {
-                "周一": "A",  # 10:00-18:00
+                "周一": "A",
             }
         }
         shifts = get_shifts()
-        coverage = get_hourly_coverage(schedule, shifts, "周一")
-        assert len(coverage) == 12  # 10:00-21:00
-        # A shift covers 10-17 (8 hour slots)
-        assert coverage[0] == 1  # 10:00
-        assert coverage[7] == 1  # 17:00
-        assert coverage[8] == 0  # 18:00 - A班结束
+        coverage = get_half_hourly_coverage(schedule, shifts, "周一")
+        # A shift: 10:00-18:00 → covers 16 half-hour slots (10:00 to 17:30)
+        slots_covered = [s for s in coverage if s["staff"] > 0]
+        assert len(slots_covered) == 16
+        # 10:00 should be covered
+        assert coverage[0]["time"] == "10:00"
+        assert coverage[0]["staff"] == 1
+        # 18:00 should NOT be covered (A ends at 18:00)
+        end_slot = [s for s in coverage if s["time"] == "18:00"]
+        assert end_slot and end_slot[0]["staff"] == 0
 
     def test_two_employees_overlap(self):
         schedule = {
-            "张三": {"周一": "A"},  # 10:00-18:00
-            "李四": {"周一": "B"},  # 12:00-20:00
+            "张三": {"周一": "A"},
+            "李四": {"周一": "B"},
         }
         shifts = get_shifts()
-        coverage = get_hourly_coverage(schedule, shifts, "周一")
-        assert coverage[0] == 1  # 10:00 - only A
-        assert coverage[2] == 2  # 12:00 - A + B
-        assert coverage[8] == 1  # 18:00 - only B
+        coverage = get_half_hourly_coverage(schedule, shifts, "周一")
+        # 10:00 - only A
+        slot_10 = [s for s in coverage if s["time"] == "10:00"][0]
+        assert slot_10["staff"] == 1
+        # 12:00 - A + B
+        slot_12 = [s for s in coverage if s["time"] == "12:00"][0]
+        assert slot_12["staff"] == 2
+        # 18:00 - only B
+        slot_18 = [s for s in coverage if s["time"] == "18:00"][0]
+        assert slot_18["staff"] == 1
+
+    def test_employee_rest(self):
+        schedule = {
+            "张三": {"周一": None},
+        }
+        shifts = get_shifts()
+        coverage = get_half_hourly_coverage(schedule, shifts, "周一")
+        for slot in coverage:
+            assert slot["staff"] == 0
