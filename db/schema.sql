@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS stores (
     productivity_per_hour INTEGER NOT NULL DEFAULT 18,
     base_daily_customers INTEGER NOT NULL DEFAULT 200,
     peak_customers_per_hour INTEGER NOT NULL DEFAULT 60,
+    weekday_lunch_peak TEXT NOT NULL DEFAULT '12:00-14:00',
+    weekday_dinner_peak TEXT NOT NULL DEFAULT '17:00-19:00',
+    weekend_lunch_peak TEXT NOT NULL DEFAULT '11:00-14:00',
+    weekend_dinner_peak TEXT NOT NULL DEFAULT '16:00-20:00',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

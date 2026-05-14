@@ -76,22 +76,22 @@ def get_store(store_id: str) -> dict:
     return data[0] if data else {}
 
 
-def create_store(store_data: dict) -> dict:
-    """创建门店"""
+def create_store(store_data: dict) -> dict | None:
+    """创建门店，返回新门店数据，无连接时返回 None"""
     client = get_client()
     if client is None:
         warnings.warn("Supabase 未配置，无法创建门店")
-        return {}
+        return None
     data = client.table("stores").insert(store_data).execute().data
     return data[0] if data else {}
 
 
-def update_store(store_id: str, store_data: dict) -> dict:
-    """更新门店"""
+def update_store(store_id: str, store_data: dict) -> dict | None:
+    """更新门店，返回更新后数据，无连接时返回 None"""
     client = get_client()
     if client is None:
         warnings.warn("Supabase 未配置，无法更新门店")
-        return {}
+        return None
     data = (
         client.table("stores")
         .update(store_data)
