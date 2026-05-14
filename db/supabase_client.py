@@ -5,6 +5,7 @@ Supabase 客户端模块
 
 import os
 import warnings
+from pathlib import Path
 from typing import Optional
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -18,11 +19,14 @@ _client: Optional[Client] = None
 def _build_client() -> Optional[Client]:
     """
     依次尝试从以下来源读取 Supabase 配置，返回 client 或 None：
-    1. st.secrets["SUPABASE_URL"] / st.secrets["SUPABASE_ANON_KEY"]   （Streamlit Cloud 扁平 keys）
-    2. st.secrets["supabase"]["url"] / st.secrets["supabase"]["anon_key"]（本地 .streamlit/secrets.toml）
-    3. 环境变量 SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_KEY
+    1. st.secrets（Streamlit Cloud / .streamlit/secrets.toml）
+    2. 环境变量 SUPABASE_URL + SUPABASE_ANON_KEY / SUPABASE_KEY
+    3. 直接从 .streamlit/secrets.toml 文件读取（兜底）
     """
-    # 1. Streamlit secrets（Cloud 部署）
+    url = ""
+    key = ""
+
+    # 1. Streamlit secrets
     try:
         import streamlit as st
         url = (
@@ -34,16 +38,43 @@ def _build_client() -> Optional[Client]:
             or st.secrets.get("supabase", {}).get("anon_key", "")
             or st.secrets.get("SUPABASE_KEY", "")
         )
-        if url and key:
-            return create_client(url, key)
     except Exception:
         pass
 
-    # 2. 环境变量（本地开发）
-    url = os.environ.get("SUPABASE_URL", "")
-    key = os.environ.get("SUPABASE_ANON_KEY", "") or os.environ.get("SUPABASE_KEY", "")
+    # 2. 环境变量
+    if not url:
+        url = os.environ.get("SUPABASE_URL", "")
+    if not key:
+        key = os.environ.get("SUPABASE_ANON_KEY", "") or os.environ.get("SUPABASE_KEY", "")
+
+    # 3. 直接从 .streamlit/secrets.toml 兜底
+    if not url or not key:
+        try:
+            import tomllib  # Python 3.11+
+        except ImportError:
+            try:
+                import tomli as tomllib  # Python 3.9-3.10 (pip install tomli)
+            except ImportError:
+                tomllib = None
+        if tomllib:
+            try:
+                toml_path = Path(__file__).resolve().parent.parent / ".streamlit" / "secrets.toml"
+                if toml_path.exists():
+                    with open(toml_path, "rb") as f:
+                        toml_data = tomllib.load(f)
+                    supabase_section = toml_data.get("supabase", {})
+                    if not url:
+                        url = supabase_section.get("url", "")
+                    if not key:
+                        key = supabase_section.get("anon_key", "") or supabase_section.get("key", "")
+            except Exception:
+                pass
+
     if url and key:
-        return create_client(url, key)
+        try:
+            return create_client(url, key)
+        except Exception as e:
+            warnings.warn(f"Supabase 客户端创建失败: {e}")
 
     return None
 
