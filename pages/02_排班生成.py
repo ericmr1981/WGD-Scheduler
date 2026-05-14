@@ -194,6 +194,12 @@ if st.button("🔨 生成排班方案", type="primary"):
     st.markdown("---")
 
     # ─── 班次结构说明（含开早/打烊/就餐）───────────────────────────
+    shifts = calculate_shifts(
+        open_hour=open_hour, close_hour=close_hour,
+        opening_prep_mins=opening_prep, closing_tasks_mins=closing_tasks,
+        meal_break_mins=meal_break, target_hours=target_hours,
+    )
+    shift_map = {s.name: s for s in shifts}
     a_s, a_e = shifts[0].start, shifts[0].end
     b_s, b_e = shifts[1].start, shifts[1].end
     c_s, c_e = shifts[2].start, shifts[2].end
@@ -218,12 +224,6 @@ if st.button("🔨 生成排班方案", type="primary"):
     emp_names = [f"员工{i+1}" for i in range(employees)]
 
     rest = recommend_rest_days(emp_names, 1, min_on_duty=effective_min_staff, week_days=week_days)
-    shifts = calculate_shifts(
-        open_hour=open_hour, close_hour=close_hour,
-        opening_prep_mins=opening_prep, closing_tasks_mins=closing_tasks,
-        meal_break_mins=meal_break, target_hours=target_hours,
-    )
-    shift_map = {s.name: s for s in shifts}
 
     # 动态分配：每人每天按当天在岗人数分配班次，确保营业时段全覆盖
     full_schedule: dict[str, dict[str, str | None]] = {}
