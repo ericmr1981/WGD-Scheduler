@@ -24,9 +24,27 @@ STANDARD_SHIFTS = [
 ]
 
 
-def get_shifts() -> List[Shift]:
-    """返回标准班次列表"""
-    return STANDARD_SHIFTS
+def get_shifts(
+    a_start: int = 10, a_end: int = 18,
+    b_start: int = 12, b_end: int = 20,
+    c_start: int = 14, c_end: int = 22,
+) -> List[Shift]:
+    """
+    返回班次列表，支持自定义各班组时间。
+
+    Args:
+        a_start / a_end: A 班起止小时
+        b_start / b_end: B 班起止小时
+        c_start / c_end: C 班起止小时
+
+    Returns:
+        [Shift_A, Shift_B, Shift_C]
+    """
+    return [
+        Shift(name="A", start=a_start, end=a_end, duration=a_end - a_start, peak_coverage=True),
+        Shift(name="B", start=b_start, end=b_end, duration=b_end - b_start, peak_coverage=True),
+        Shift(name="C", start=c_start, end=c_end, duration=c_end - c_start, peak_coverage=False),
+    ]
 
 
 def rotate_shifts(
@@ -107,7 +125,12 @@ def get_hourly_coverage(
     Returns:
         每小时在岗人数列表 [人数(hour=10), ..., 人数(hour=21)]
     """
-    hourly = [0] * 12  # 10:00-21:00 (各小时起始)
+    if not shifts:
+        return []
+    cov_start = min(s.start for s in shifts)
+    cov_end = max(s.end for s in shifts)
+    cov_hours = cov_end - cov_start
+    hourly = [0] * cov_hours
     shift_map = {s.name: s for s in shifts}
 
     for emp, days in schedule.items():
@@ -120,8 +143,8 @@ def get_hourly_coverage(
             continue
 
         for h in range(shift.start, shift.end):
-            idx = h - 10
-            if 0 <= idx < 12:
+            idx = h - cov_start
+            if 0 <= idx < cov_hours:
                 hourly[idx] += 1
 
     return hourly

@@ -115,6 +115,14 @@ default_max_meals      = get_default("max_meals_per_employee", 1)
 default_target_hours   = float(get_default("target_hours_per_employee", 8.0))
 default_min_staff      = get_default("min_staff_on_duty", 1)
 
+# 班次时间
+default_a_start = get_default("shift_a_start", 10)
+default_a_end   = get_default("shift_a_end", 18)
+default_b_start = get_default("shift_b_start", 12)
+default_b_end   = get_default("shift_b_end", 20)
+default_c_start = get_default("shift_c_start", 14)
+default_c_end   = get_default("shift_c_end", 22)
+
 # ─── 表单 ─────────────────────────────────────────────────────────
 
 with st.expander("🏪 门店信息", expanded=True):
@@ -201,6 +209,29 @@ with st.expander("⏰ 工时与员工参数", expanded=False):
             help="任何时间至少保持的在岗人数（安全底线）"
         )
 
+with st.expander("🕐 班次时间（可自定义）", expanded=False):
+    st.markdown("可手动调整 A/B/C 班次的起止时间，排班时会使用自定义时间。")
+    st.markdown("**A 班**（开店 + 午高峰）")
+    col1, col2 = st.columns(2)
+    with col1:
+        a_start = st.number_input("A 班开始", min_value=6, max_value=18, value=default_a_start, step=1)
+    with col2:
+        a_end = st.number_input("A 班结束", min_value=8, max_value=22, value=default_a_end, step=1)
+
+    st.markdown("**B 班**（午高峰 + 晚高峰）")
+    col1, col2 = st.columns(2)
+    with col1:
+        b_start = st.number_input("B 班开始", min_value=6, max_value=20, value=default_b_start, step=1)
+    with col2:
+        b_end = st.number_input("B 班结束", min_value=8, max_value=22, value=default_b_end, step=1)
+
+    st.markdown("**C 班**（晚高峰 + 打烊）")
+    col1, col2 = st.columns(2)
+    with col1:
+        c_start = st.number_input("C 班开始", min_value=6, max_value=20, value=default_c_start, step=1)
+    with col2:
+        c_end = st.number_input("C 班结束", min_value=8, max_value=22, value=default_c_end, step=1)
+
 # ─── 保存 ─────────────────────────────────────────────────────────
 
 if st.button("💾 保存配置", type="primary"):
@@ -223,6 +254,12 @@ if st.button("💾 保存配置", type="primary"):
         "max_meals_per_employee": max_meals,
         "target_hours_per_employee": target_hours,
         "min_staff_on_duty": min_on_duty,
+        "shift_a_start": a_start,
+        "shift_a_end": a_end,
+        "shift_b_start": b_start,
+        "shift_b_end": b_end,
+        "shift_c_start": c_start,
+        "shift_c_end": c_end,
     }
 
     try:
@@ -265,6 +302,12 @@ if st.button("💾 保存配置", type="primary"):
             "max_meals_per_employee": max_meals,
             "target_hours_per_employee": target_hours,
             "min_staff_on_duty": min_on_duty,
+            "shift_a_start": a_start,
+            "shift_a_end": a_end,
+            "shift_b_start": b_start,
+            "shift_b_end": b_end,
+            "shift_c_start": c_start,
+            "shift_c_end": c_end,
         }
         st.session_state["store_id"] = store_id
     except Exception as e:

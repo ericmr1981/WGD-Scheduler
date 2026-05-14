@@ -22,6 +22,12 @@ CREATE TABLE IF NOT EXISTS stores (
     max_meals_per_employee INTEGER NOT NULL DEFAULT 1,
     target_hours_per_employee NUMERIC(4,1) NOT NULL DEFAULT 8.0,
     min_staff_on_duty INTEGER NOT NULL DEFAULT 1,
+    shift_a_start INTEGER NOT NULL DEFAULT 10,
+    shift_a_end INTEGER NOT NULL DEFAULT 18,
+    shift_b_start INTEGER NOT NULL DEFAULT 12,
+    shift_b_end INTEGER NOT NULL DEFAULT 20,
+    shift_c_start INTEGER NOT NULL DEFAULT 14,
+    shift_c_end INTEGER NOT NULL DEFAULT 22,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
