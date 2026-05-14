@@ -100,4 +100,19 @@ if st.button("🔨 生成排班方案", type="primary"):
             st.metric(day, f"{count} 人",
                       delta="✅" if count >= 2 else "⚠️")
 
+    # 生成每小时覆盖数据（传给排班检查页）
+    shifts = get_shifts()
+    rotation = {emp_names[i]: ["A", "B", "C"][i % 3] for i in range(employees)}
+    full_schedule = generate_weekly_schedule(emp_names, rest, shifts, rotation, week_days)
+    # 取周三（普通工作日）作为每小时覆盖示例
+    hourly = get_hourly_coverage(full_schedule, shifts, "周三")
+
+    st.session_state["schedule_result"] = {
+        "hourly_coverage": hourly,
+        "min_required": min_staff,
+        "peak_hours": [12, 13, 17, 18],
+        "min_staff": min_staff,
+        "employees": employees,
+    }
+
     st.success("✅ 排班生成完成！请前往「排班检查」页面进行验证。")
