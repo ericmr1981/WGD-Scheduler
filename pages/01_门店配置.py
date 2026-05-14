@@ -6,7 +6,7 @@ import os
 import json
 import streamlit as st
 from urllib.request import Request, urlopen
-from db.supabase_client import get_stores, create_store, update_store, get_client, get_backend_name
+from db.supabase_client import get_stores, create_store, update_store, get_client
 
 st.set_page_config(page_title="门店配置", page_icon="📊")
 
@@ -18,7 +18,7 @@ col1, col2 = st.columns([3, 1])
 with col1:
     client = get_client()
     if client is not None:
-        st.info(f"✅ Supabase 已连接（{get_backend_name()}），数据将持久保存到云端。")
+        st.info("✅ Supabase 已连接，数据将持久保存到云端。")
     else:
         # 诊断：检查配置是否存在
         supabase_url = ""
