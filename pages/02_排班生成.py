@@ -10,6 +10,12 @@ from scheduler.rest_days import recommend_rest_days, validate_coverage
 from scheduler.peaks import estimate_half_hourly_customers
 from db.supabase_client import get_stores
 
+try:
+    from scheduler.optimizer import optimize_schedule
+    _HAVE_OPTIMIZER = True
+except ImportError:
+    _HAVE_OPTIMIZER = False
+
 st.set_page_config(page_title="排班生成", page_icon="📋")
 
 st.title("📋 排班生成")
@@ -227,32 +233,66 @@ if st.button("🔨 生成排班方案", type="primary"):
     week_days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
     emp_names = [f"员工{i+1}" for i in range(employees)]
 
-    rest = recommend_rest_days(emp_names, 1, min_on_duty=effective_min_staff, week_days=week_days)
-
-    # 动态分配：每人每天按当天在岗人数分配班次，确保营业时段全覆盖
-    full_schedule: dict[str, dict[str, str | None]] = {}
+    # ── 构建 30 分钟客流需求 ─────────────────────────────────────
+    demand_30min: dict[str, dict[str, int]] = {}
     for day in week_days:
-        on_duty = [e for e in emp_names if day not in rest.get(e, [])]
-        emp_shifts: dict[str, str | None] = {}
-        for emp in emp_names:
-            if day in rest.get(emp, []):
-                emp_shifts[emp] = None
-            elif len(on_duty) == 3:
-                idx = on_duty.index(emp)
-                emp_shifts[emp] = ["A", "B", "C"][idx]
-            elif len(on_duty) == 2:
-                idx = on_duty.index(emp)
-                emp_shifts[emp] = "A" if idx == 0 else "C"
-            else:
-                emp_shifts[emp] = "A" if emp == on_duty[0] else None
-        full_schedule[day] = emp_shifts
+        dist = estimate_half_hourly_customers(
+            base_customers, day_name=day, peak_periods=peak_periods,
+        )
+        demand_30min[day] = {d["time"]: d["customers"] for d in dist}
 
-    # 转置为 {emp: {day: shift}} 格式
-    schedule_by_emp: dict[str, dict[str, str | None]] = {}
-    for emp in emp_names:
-        schedule_by_emp[emp] = {}
+    # ── 使用 CP-SAT 求解器 ───────────────────────────────────────
+    if _HAVE_OPTIMIZER:
+        result = optimize_schedule(
+            emp_names=emp_names,
+            week_days=week_days,
+            shifts=shifts,
+            productivity=productivity,
+            demand_30min=demand_30min,
+            min_staff=effective_min_staff,
+            time_limit_seconds=10,
+        )
+
+        if result["status"] == "INFEASIBLE":
+            st.error("⚠️ 求解器无法找到可行排班方案，请检查约束条件是否过于严格。")
+            st.stop()
+        elif result["status"] == "ERROR":
+            st.warning("⚠️ 求解器出错，切换到规则算法。")
+            _HAVE_OPTIMIZER = False
+        else:
+            schedule_by_emp = result["schedule"]
+    else:
+        schedule_by_emp = None
+
+    if not _HAVE_OPTIMIZER or schedule_by_emp is None:
+        rest = recommend_rest_days(
+            emp_names, 1, min_on_duty=effective_min_staff, week_days=week_days
+        )
+        full_schedule: dict[str, dict[str, str | None]] = {}
         for day in week_days:
-            schedule_by_emp[emp][day] = full_schedule[day].get(emp)
+            on_duty = [e for e in emp_names if day not in rest.get(e, [])]
+            emp_shifts: dict[str, str | None] = {}
+            for emp in emp_names:
+                if day in rest.get(emp, []):
+                    emp_shifts[emp] = None
+                elif len(on_duty) == 3:
+                    emp_shifts[emp] = ["A", "B", "C"][on_duty.index(emp)]
+                elif len(on_duty) == 2:
+                    emp_shifts[emp] = "A" if on_duty.index(emp) == 0 else "C"
+                else:
+                    emp_shifts[emp] = "A" if emp == on_duty[0] else None
+            full_schedule[day] = emp_shifts
+
+        schedule_by_emp = {}
+        for emp in emp_names:
+            schedule_by_emp[emp] = {}
+            for day in week_days:
+                schedule_by_emp[emp][day] = full_schedule[day].get(emp)
+
+    # 从 schedule_by_emp 提取休息日
+    rest = {}
+    for emp in emp_names:
+        rest[emp] = [day for day in week_days if schedule_by_emp[emp][day] is None]
 
     # 休息日说明
     st.markdown("### 📅 休息日安排（每人每周1天）")
