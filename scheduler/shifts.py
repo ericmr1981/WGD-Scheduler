@@ -47,6 +47,59 @@ def get_shifts(
     ]
 
 
+def calculate_shifts(
+    open_hour: int = 10,
+    close_hour: int = 22,
+    opening_prep_mins: int = 60,
+    closing_tasks_mins: int = 60,
+    meal_break_mins: int = 60,
+    target_hours: float = 8.0,
+) -> List[Shift]:
+    """
+    根据营运参数自动计算 A/B/C 班次时间。
+
+    公式：
+      shift_duration = target_hours + meal_break / 60
+      A: 从 (open - prep) 开始，持续 duration
+      C: 到 (close + closing_tasks) 结束，持续 duration
+      B: A 和 C 正中间 + rounding
+
+    Args:
+        open_hour: 营业开始小时
+        close_hour: 营业结束小时
+        opening_prep_mins: 开早分钟数
+        closing_tasks_mins: 打烊分钟数
+        meal_break_mins: 每餐分钟数
+        target_hours: 目标工时
+
+    Returns:
+        [Shift_A, Shift_B, Shift_C]
+    """
+    duration = target_hours + meal_break_mins / 60  # e.g. 8+1=9h
+
+    a_start_f = open_hour - opening_prep_mins / 60
+    a_end_f = a_start_f + duration
+
+    c_end_f = close_hour + closing_tasks_mins / 60
+    c_start_f = c_end_f - duration
+
+    b_start_f = (a_start_f + c_start_f) / 2
+    b_end_f = b_start_f + duration
+
+    # 四舍五入到整点
+    def _r(v: float) -> int:
+        return int(round(v))
+
+    return [
+        Shift(name="A", start=_r(a_start_f), end=_r(a_end_f),
+              duration=_r(duration), peak_coverage=True),
+        Shift(name="B", start=_r(b_start_f), end=_r(b_end_f),
+              duration=_r(duration), peak_coverage=True),
+        Shift(name="C", start=_r(c_start_f), end=_r(c_end_f),
+              duration=_r(duration), peak_coverage=False),
+    ]
+
+
 def rotate_shifts(
     current_rotation: Dict[str, str],
     week_number: int,

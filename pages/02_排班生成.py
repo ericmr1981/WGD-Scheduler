@@ -5,7 +5,7 @@
 import streamlit as st
 import pandas as pd
 from scheduler.core import calculate_min_staff, calculate_staffing_requirements
-from scheduler.shifts import get_shifts, generate_weekly_schedule, get_hourly_coverage
+from scheduler.shifts import calculate_shifts, get_hourly_coverage
 from scheduler.rest_days import recommend_rest_days, validate_coverage
 from scheduler.peaks import estimate_half_hourly_customers
 from db.supabase_client import get_stores
@@ -44,12 +44,6 @@ if not config:
                 "max_meals_per_employee": s.get("max_meals_per_employee", 1),
                 "target_hours_per_employee": float(s.get("target_hours_per_employee", 8.0)),
                 "min_staff_on_duty": s.get("min_staff_on_duty", 1),
-                "shift_a_start": s.get("shift_a_start", 10),
-                "shift_a_end": s.get("shift_a_end", 18),
-                "shift_b_start": s.get("shift_b_start", 12),
-                "shift_b_end": s.get("shift_b_end", 20),
-                "shift_c_start": s.get("shift_c_start", 14),
-                "shift_c_end": s.get("shift_c_end", 22),
             }
             st.session_state["store_config"] = config
             st.session_state["store_id"] = s["id"]
@@ -200,21 +194,22 @@ if st.button("🔨 生成排班方案", type="primary"):
     st.markdown("---")
 
     # ─── 班次结构说明（含开早/打烊/就餐）───────────────────────────
-    a_s, a_e = config.get("shift_a_start", 10), config.get("shift_a_end", 18)
-    b_s, b_e = config.get("shift_b_start", 12), config.get("shift_b_end", 20)
-    c_s, c_e = config.get("shift_c_start", 14), config.get("shift_c_end", 22)
-    st.markdown("### 🕐 班次结构（含开早/打烊/就餐）")
+    a_s, a_e = shifts[0].start, shifts[0].end
+    b_s, b_e = shifts[1].start, shifts[1].end
+    c_s, c_e = shifts[2].start, shifts[2].end
+    shift_dur = a_e - a_s
+    st.markdown("### 🕐 班次结构（自动计算）")
     prep_h = opening_prep / 60
     close_h = closing_tasks / 60
     st.markdown(f"""
     | 时段 | 时间 | 说明 |
     |------|------|------|
-    | **开早准备** | {open_hour - prep_h:.0f}:00~{open_hour}:00 | 至少{staffing["opening_staff_needed"]}人提前{opening_prep}分钟到店 |
+    | **开早准备** | {a_s}:00~{open_hour}:00 | A 班到店做开早准备 |
     | **营业时间** | {open_hour}:00~{close_hour}:00 | 正式营业，共 {close_hour - open_hour}h |
-    | **打烊收尾** | {close_hour}:00~{close_hour + close_h:.0f}:00 | 至少{staffing["closing_staff_needed"]}人延后{closing_tasks}分钟离店 |
-    | **班次 A** | {a_s}:00~{a_e}:00（含{meal_break}min就餐） | 覆盖开店+午高峰 |
-    | **班次 B** | {b_s}:00~{b_e}:00（含{meal_break}min就餐） | 覆盖午高峰+晚高峰 |
-    | **班次 C** | {c_s}:00~{c_e}:00（含{meal_break}min就餐） | 覆盖晚高峰+打烊 |
+    | **打烊收尾** | {close_hour}:00~{c_e}:00 | C 班延后做打烊收尾 |
+    | **班次 A** | {a_s}:00~{a_e}:00（{shift_dur}h，含餐{meal_break}min） | 开早准备+开店+午高峰 |
+    | **班次 B** | {b_s}:00~{b_e}:00（{shift_dur}h，含餐{meal_break}min） | 午高峰+晚高峰 |
+    | **班次 C** | {c_s}:00~{c_e}:00（{shift_dur}h，含餐{meal_break}min） | 晚高峰+打烊收尾 |
     """)
 
     # ─── 生成排班表 ───────────────────────────────────────────────
@@ -223,10 +218,10 @@ if st.button("🔨 生成排班方案", type="primary"):
     emp_names = [f"员工{i+1}" for i in range(employees)]
 
     rest = recommend_rest_days(emp_names, 1, min_on_duty=effective_min_staff, week_days=week_days)
-    shifts = get_shifts(
-        a_start=config.get("shift_a_start", 10), a_end=config.get("shift_a_end", 18),
-        b_start=config.get("shift_b_start", 12), b_end=config.get("shift_b_end", 20),
-        c_start=config.get("shift_c_start", 14), c_end=config.get("shift_c_end", 22),
+    shifts = calculate_shifts(
+        open_hour=open_hour, close_hour=close_hour,
+        opening_prep_mins=opening_prep, closing_tasks_mins=closing_tasks,
+        meal_break_mins=meal_break, target_hours=target_hours,
     )
     shift_map = {s.name: s for s in shifts}
 
