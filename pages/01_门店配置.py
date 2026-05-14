@@ -86,10 +86,10 @@ def get_default(key, default):
     return default
 
 def parse_hour(time_str, default):
-    """从 '10:00' 或 '10:30' 格式提取小时数（float，30分钟颗粒度）。"""
+    """从 '10:00' 或 '10:30:00' 格式提取小时数（float，30分钟颗粒度）。"""
     if isinstance(time_str, str) and ":" in time_str:
-        h, m = time_str.split(":")
-        return int(h) + int(m) / 60
+        parts = time_str.split(":")
+        return int(parts[0]) + int(parts[1]) / 60
     return default
 
 default_open = parse_hour(get_default("open_time", None), 10)
