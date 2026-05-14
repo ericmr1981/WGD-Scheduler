@@ -92,8 +92,8 @@ def parse_hour(time_str, default):
         return int(parts[0]) + int(parts[1]) / 60
     return default
 
-default_open = parse_hour(get_default("open_time", None), 10)
-default_close = parse_hour(get_default("close_time", None), 22)
+default_open = float(parse_hour(get_default("open_time", None), 10))
+default_close = float(parse_hour(get_default("close_time", None), 22))
 default_emp = get_default("employee_count", 3)
 default_prod = get_default("productivity_per_hour", 18)
 default_peak = get_default("peak_customers_per_hour", 60)
