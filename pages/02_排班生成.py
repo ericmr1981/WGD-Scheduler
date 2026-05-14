@@ -214,41 +214,91 @@ if st.button("🔨 生成排班方案", type="primary"):
     week_days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
     emp_names = [f"员工{i+1}" for i in range(employees)]
 
-    rest = recommend_rest_days(emp_names, 2, min_on_duty=min_on_duty, week_days=week_days)
+    rest = recommend_rest_days(emp_names, 1, min_on_duty=effective_min_staff, week_days=week_days)
     shifts = get_shifts()
-    rotation = {emp_names[i]: ["A", "B", "C"][i % 3] for i in range(employees)}
-    full_schedule = generate_weekly_schedule(emp_names, rest, shifts, rotation, week_days)
+    shift_map = {s.name: s for s in shifts}
+
+    # 动态分配：每人每天按当天在岗人数分配班次，确保营业时段全覆盖
+    full_schedule: dict[str, dict[str, str | None]] = {}
+    for day in week_days:
+        on_duty = [e for e in emp_names if day not in rest.get(e, [])]
+        emp_shifts: dict[str, str | None] = {}
+        for emp in emp_names:
+            if day in rest.get(emp, []):
+                emp_shifts[emp] = None
+            elif len(on_duty) == 3:
+                idx = on_duty.index(emp)
+                emp_shifts[emp] = ["A", "B", "C"][idx]
+            elif len(on_duty) == 2:
+                idx = on_duty.index(emp)
+                emp_shifts[emp] = "A" if idx == 0 else "C"
+            else:
+                emp_shifts[emp] = "A" if emp == on_duty[0] else None
+        full_schedule[day] = emp_shifts
+
+    # 转置为 {emp: {day: shift}} 格式
+    schedule_by_emp: dict[str, dict[str, str | None]] = {}
+    for emp in emp_names:
+        schedule_by_emp[emp] = {}
+        for day in week_days:
+            schedule_by_emp[emp][day] = full_schedule[day].get(emp)
 
     # 休息日说明
-    st.markdown("### 📅 休息日安排")
+    st.markdown("### 📅 休息日安排（每人每周1天）")
     for emp, days in rest.items():
         st.markdown(f"- **{emp}**：休息 {'、'.join(days)}")
 
-    coverage = validate_coverage(rest, week_days)
-    st.markdown("**每天在岗人数检查：**")
-    cols = st.columns(7)
-    for i, day in enumerate(week_days):
-        with cols[i]:
-            count = coverage.get(day, 0)
-            st.metric(day, f"{count} 人", delta="✅" if count >= effective_min_staff else "⚠️")
+    # 验证：连续休息
+    consecutive_issue = False
+    for emp in emp_names:
+        rdays = rest.get(emp, [])
+        for d in rdays:
+            idx = week_days.index(d)
+            if (idx > 0 and week_days[idx - 1] in rdays) or \
+               (idx < len(week_days) - 1 and week_days[idx + 1] in rdays):
+                st.warning(f"⚠️ {emp} 连续休息 — 违反规则")
+                consecutive_issue = True
+    if not consecutive_issue:
+        st.caption("✅ 无连续休息")
+
+    # 验证：每小时在岗
+    st.markdown("### 🔍 每小时在岗验证（营业时间10:00-22:00）")
+    all_covered = True
+    for day in week_days:
+        hourly = [0] * 12
+        for emp in emp_names:
+            sn = schedule_by_emp[emp][day]
+            if sn is None:
+                continue
+            s = shift_map.get(sn)
+            if s:
+                for h in range(s.start, s.end):
+                    idx = h - 10
+                    if 0 <= idx < 12:
+                        hourly[idx] += 1
+        zero = [10 + i for i, c in enumerate(hourly) if c == 0]
+        mn = min(hourly) if hourly else 0
+        if zero:
+            st.warning(f"  {day} ⚠️ 最低{mn}人 | 无人时段: {', '.join(f'{h}' for h in zero)}:00")
+            all_covered = False
+        else:
+            st.markdown(f"  {day} ✅ 最低{mn}人")
+    if all_covered:
+        st.success("✅ 所有营业时段均有员工在岗")
 
     # ─── 每日排班明细表 ───────────────────────────────────────────
     st.markdown("### 📋 每日排班明细表")
 
-    # 构造排班矩阵：行为员工，列为日期
     table_data = {}
     for day in week_days:
         day_col = []
         for emp in emp_names:
-            shift = full_schedule[emp][day]
-            if shift is None:
+            sn = schedule_by_emp[emp][day]
+            if sn is None:
                 day_col.append("休息")
             else:
-                shift_obj = next((s for s in shifts if s.name == shift), None)
-                if shift_obj:
-                    day_col.append(f"{shift} 班\n({shift_obj.start}:00-{shift_obj.end}:00)")
-                else:
-                    day_col.append(f"{shift} 班")
+                s = shift_map.get(sn)
+                day_col.append(f"{sn}班\n({s.start}:00-{s.end}:00)" if s else f"{sn}班")
         table_data[day] = day_col
 
     df_schedule = pd.DataFrame(table_data, index=emp_names)
@@ -257,22 +307,23 @@ if st.button("🔨 生成排班方案", type="primary"):
     # 按班次汇总
     st.markdown("#### 👥 各班次人员分布")
     for day in week_days:
-        shift_groups: dict[str, list[str]] = {}
+        groups: dict[str, list[str]] = {}
         for emp in emp_names:
-            s = full_schedule[emp][day]
-            shift_groups.setdefault(s if s else "休息", []).append(emp)
+            sn = schedule_by_emp[emp][day]
+            groups.setdefault(sn if sn else "休息", []).append(emp)
 
         parts = []
-        for shift_name, members in sorted(shift_groups.items()):
-            if shift_name == "休息":
-                parts.append(f"休息：{'、'.join(members)}")
+        for k, v in sorted(groups.items()):
+            if k == "休息":
+                parts.append(f"休息：{'、'.join(v)}")
             else:
-                parts.append(f"{shift_name}班：{'、'.join(members)}")
-
+                s = shift_map.get(k)
+                ts = f"({s.start}:00-{s.end}:00)" if s else ""
+                parts.append(f"{k}班{ts}：{'、'.join(v)}")
         st.markdown(f"**{day}** | {' | '.join(parts)}")
 
     # ─── 每小时覆盖（传排班检查页）────────────────────────────────
-    hourly = get_hourly_coverage(full_schedule, shifts, "周三")
+    hourly = get_hourly_coverage(schedule_by_emp, shifts, "周三")
     st.session_state["schedule_result"] = {
         "hourly_coverage": hourly,
         "min_required": effective_min_staff,
