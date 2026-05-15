@@ -144,6 +144,41 @@ def generate_weekly_schedule(
     return schedule
 
 
+def generate_shift_pool(
+    open_hour: float = 10.0,
+    close_hour: float = 22.0,
+    opening_prep_mins: int = 60,
+    closing_tasks_mins: int = 60,
+    meal_break_mins: int = 60,
+    target_hours: float = 8.0,
+) -> List[Shift]:
+    """
+    生成营业时间内所有可能的连续 9 小时班次（30 分钟颗粒度）。
+
+    例如 9:00~23:00 范围内：
+      S1: 09:00-18:00, S2: 09:30-18:30, ..., S10: 14:00-23:00
+
+    Returns:
+        [Shift_S1, Shift_S2, ...]
+    """
+    duration = target_hours + meal_break_mins / 60  # e.g. 9h
+    start_earliest = open_hour - opening_prep_mins / 60
+    end_latest = close_hour + closing_tasks_mins / 60
+
+    shifts: list[Shift] = []
+    t = start_earliest
+    idx = 1
+    while t + duration <= end_latest + 0.01:
+        sh = _round_half(t)
+        eh = _round_half(t + duration)
+        peak = (11 <= eh <= 14) or (17 <= eh <= 20)  # heuristic
+        shifts.append(Shift(name=f"S{idx}", start=sh, end=eh,
+                            duration=duration, peak_coverage=peak))
+        t += 0.5
+        idx += 1
+    return shifts
+
+
 def get_half_hourly_coverage(
     schedule: Dict[str, Dict[str, Optional[str]]],
     shifts: List[Shift],
