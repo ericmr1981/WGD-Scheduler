@@ -151,16 +151,16 @@ with st.expander("⚙️ 产能参数", expanded=True):
     st.markdown("按出品类型拆解单人产能，排班会使用加权平均。")
     cols = st.columns(4)
     with cols[0]:
-        prod_a = st.number_input("出品A类（单/h）", min_value=1, value=default_prod_a,
+        prod_a = st.number_input("出品A类（单/h）", min_value=0, value=default_prod_a,
                                   help="简易出品，如 cone/prepack")
     with cols[1]:
-        prod_b = st.number_input("出品B类（单/h）", min_value=1, value=default_prod_b,
+        prod_b = st.number_input("出品B类（单/h）", min_value=0, value=default_prod_b,
                                   help="常规出品，如 cup/shake")
     with cols[2]:
-        prod_c = st.number_input("出品C类（单/h）", min_value=1, value=default_prod_c,
+        prod_c = st.number_input("出品C类（单/h）", min_value=0, value=default_prod_c,
                                   help="复杂出品，如 sundae/affogato")
     with cols[3]:
-        prod_other = st.number_input("其它（单/h）", min_value=1, value=default_prod_other,
+        prod_other = st.number_input("其它（单/h）", min_value=0, value=default_prod_other,
                                       help="非标准化出品")
 
     st.markdown("---")
