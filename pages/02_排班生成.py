@@ -88,10 +88,8 @@ with st.expander("📥 本周客流预估", expanded=True):
         default_peak = config["peak_customers"] if config else 60
         peak_input = st.number_input("本周高峰每小时客流量", min_value=1, value=default_peak)
     with col2:
-        default_emp = config["employees"] if config else 3
-        employees = st.number_input("可用员工数", min_value=1, value=default_emp)
-        default_prod = config["productivity"] if config else 18
-        productivity = st.number_input("单人产能（单/小时）", min_value=1, value=default_prod)
+        employees = config["employees"] if config else 3
+        productivity = config["productivity"] if config else 18
 
 # ─── 30分钟颗粒度客流分布图（自动生成）──────────────────────────
 
@@ -207,10 +205,6 @@ if st.button("🔨 生成排班方案", type="primary"):
     with col2:
         st.metric("门店每日总跨度", f'{staffing["daily_span_hours"]}h',
                   help=f"营业时长+开早{opening_prep}min+打烊{closing_tasks}min")
-        st.metric("开早占用", f'{staffing["opening_staff_needed"]} 人',
-                  help=f"开早需{opening_prep}分钟，至少1人提前到店")
-        st.metric("打烊占用", f'{staffing["closing_staff_needed"]} 人',
-                  help=f"打烊需{closing_tasks}分钟，至少1人延后离店")
     with col3:
         st.metric("全员每日可用工时", f'{staffing["total_staff_hours_per_day"]}h',
                   help=f"{employees}人 × {target_hours}h/人")
@@ -326,39 +320,6 @@ if st.button("🔨 生成排班方案", type="primary"):
                 consecutive_issue = True
     if not consecutive_issue:
         st.caption("✅ 无连续休息")
-
-    # 验证：每30分钟在岗
-    cov_start = min(s.start for s in shifts)
-    cov_end = max(s.end for s in shifts)
-    n_slots = int((cov_end - cov_start) * 2)
-    st.markdown(f"### 🔍 每30分钟在岗验证（{_fmt(cov_start)}~{_fmt(cov_end)}）")
-    all_covered = True
-    for day in week_days:
-        coverage = [0] * n_slots
-        for emp in emp_names:
-            sn = schedule_by_emp[emp][day]
-            if sn is None:
-                continue
-            s = shift_map.get(sn)
-            if s:
-                for sl in range(int(s.start * 2), int(s.end * 2)):
-                    idx = sl - int(cov_start * 2)
-                    if 0 <= idx < n_slots:
-                        coverage[idx] += 1
-        mn = min(coverage) if coverage else 0
-        zero_slots = [sl for sl, c in enumerate(coverage) if c == 0]
-        zero_times = []
-        for sl in zero_slots:
-            total_minutes = int((cov_start * 60) + sl * 30)
-            h, m = divmod(total_minutes, 60)
-            zero_times.append(f"{h:02d}:{m:02d}")
-        if zero_times:
-            st.warning(f"  {day} ⚠️ 最低{mn}人 | 无人: {', '.join(zero_times)}")
-            all_covered = False
-        else:
-            st.markdown(f"  {day} ✅ 最低{mn}人")
-    if all_covered:
-        st.success("✅ 所有营业时段均有员工在岗")
 
     # ─── 每日排班明细表 ───────────────────────────────────────────
     st.markdown("### 📋 每日排班明细表")
