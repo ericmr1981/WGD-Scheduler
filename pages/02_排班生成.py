@@ -119,8 +119,7 @@ st_echarts(options={
     "xAxis": {
         "type": "category",
         "data": times,
-        "axisLabel": {"rotate": 45, "fontSize": 10,
-                      "formatter": "function(v){return v.endsWith(':00')?v:''}"},
+        "axisLabel": {"rotate": 45, "fontSize": 10},
     },
     "yAxis": {"type": "value", "name": "客流量"},
     "series": [
@@ -130,7 +129,7 @@ st_echarts(options={
          "itemStyle": {"color": "#ff7f0e"}},
     ],
 }, height="350px")
-st.caption("📊 平日（周三）vs 周末（周六）客流对比，30分钟颗粒度，蓝色=平日 橙色=周末")
+st.caption("📊 平日（周三）vs 周末（周六）客流对比")
 
 if peak_periods:
     cols = st.columns(2)
@@ -433,8 +432,7 @@ if st.button("🔨 生成排班方案", type="primary"):
         "grid": {"left": 50, "right": 20, "top": 40, "bottom": 50},
         "xAxis": {
             "type": "category", "data": [d["time"] for d in prod_curve],
-            "axisLabel": {"rotate": 45, "fontSize": 10,
-                          "formatter": "function(v){return v.endsWith(':00')?v:''}"},
+            "axisLabel": {"rotate": 45, "fontSize": 10},
         },
         "yAxis": {"type": "value", "name": "单/30min"},
         "series": [
