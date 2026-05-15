@@ -1,166 +1,259 @@
 """
 Supabase 客户端模块
-支持 graceful fallback：配置缺失时不崩溃，只返回空数据并打印 warning
+支持 SDK + HTTP 双通道 fallback：SDK 报错时自动降级到 HTTP 直连。
 """
 
+import json
 import os
 import warnings
 from typing import Optional
-from supabase import create_client, Client
+from urllib.request import Request, urlopen
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# ─── 凭据解析（模块级）─────────────────────────────────────────
 
-_client: Optional[Client] = None
+_SUPABASE_URL = ""
+_SUPABASE_KEY = ""
+
+try:
+    import streamlit as st
+    _SUPABASE_URL = (
+        st.secrets.get("SUPABASE_URL", "")
+        or st.secrets.get("supabase", {}).get("url", "")
+    )
+    _SUPABASE_KEY = (
+        st.secrets.get("SUPABASE_ANON_KEY", "")
+        or st.secrets.get("supabase", {}).get("anon_key", "")
+        or st.secrets.get("SUPABASE_KEY", "")
+    )
+except Exception:
+    pass
+
+if not _SUPABASE_URL:
+    _SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+if not _SUPABASE_KEY:
+    _SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY", "") or os.environ.get("SUPABASE_KEY", "")
+
+# ─── HTTP 直连工具 ─────────────────────────────────────────────
 
 
-def _build_client() -> Optional[Client]:
-    """
-    从 st.secrets（Dashboard）或环境变量读取 Supabase 配置。
-    不要从 .streamlit/secrets.toml 文件兜底（文件可能包含过期密钥）。
-    """
-    url = ""
-    key = ""
-
-    # 1. Streamlit secrets
+def _http_get(path: str) -> list:
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
+        return []
+    url = f"{_SUPABASE_URL.rstrip('/')}/rest/v1/{path.lstrip('/')}"
+    req = Request(url, headers={
+        "apikey": _SUPABASE_KEY, "Authorization": f"Bearer {_SUPABASE_KEY}",
+    })
     try:
-        import streamlit as st
-        url = (
-            st.secrets.get("SUPABASE_URL", "")
-            or st.secrets.get("supabase", {}).get("url", "")
-        )
-        key = (
-            st.secrets.get("SUPABASE_ANON_KEY", "")
-            or st.secrets.get("supabase", {}).get("anon_key", "")
-            or st.secrets.get("SUPABASE_KEY", "")
-        )
+        with urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode()) or []
     except Exception:
-        pass
+        return []
 
-    # 2. 环境变量
-    if not url:
-        url = os.environ.get("SUPABASE_URL", "")
-    if not key:
-        key = os.environ.get("SUPABASE_ANON_KEY", "") or os.environ.get("SUPABASE_KEY", "")
 
+def _http_post(path: str, data: dict) -> list:
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
+        return []
+    body = json.dumps(data).encode()
+    url = f"{_SUPABASE_URL.rstrip('/')}/rest/v1/{path.lstrip('/')}"
+    req = Request(url, data=body, method="POST", headers={
+        "apikey": _SUPABASE_KEY, "Authorization": f"Bearer {_SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    })
+    try:
+        with urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode()) or []
+    except Exception:
+        return []
+
+
+def _http_patch(path: str, data: dict) -> list:
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
+        return []
+    body = json.dumps(data).encode()
+    url = f"{_SUPABASE_URL.rstrip('/')}/rest/v1/{path.lstrip('/')}"
+    req = Request(url, data=body, method="PATCH", headers={
+        "apikey": _SUPABASE_KEY, "Authorization": f"Bearer {_SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    })
+    try:
+        with urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode()) or []
+    except Exception:
+        return []
+
+
+# ─── SDK 客户端（可选）─────────────────────────────────────────
+
+_client: Optional[object] = None
+
+
+def _build_client():
+    url = _SUPABASE_URL
+    key = _SUPABASE_KEY
     if url and key:
         try:
+            from supabase import create_client
             return create_client(url, key)
         except Exception as e:
             warnings.warn(f"Supabase SDK client 创建失败: {e}")
-
     return None
 
 
-def get_client() -> Optional[Client]:
-    """
-    获取 Supabase 客户端（单例）。配置缺失时返回 None，不抛异常。
-    """
+def get_client():
     global _client
     if _client is None:
         _client = _build_client()
     return _client
 
 
+def is_connected() -> bool:
+    return _client is not None or bool(_SUPABASE_URL and _SUPABASE_KEY)
+
+
+# ─── 统一入口（SDK → HTTP fallback）────────────────────────────
+
+
 def get_stores() -> list:
-    """获取所有门店"""
     client = get_client()
-    if client is None:
-        warnings.warn("Supabase 未配置，返回空门店列表")
-        return []
-    return client.table("stores").select("*").execute().data or []
+    if client is not None:
+        try:
+            return client.table("stores").select("*").execute().data or []
+        except Exception as e:
+            warnings.warn(f"SDK 查询失败，HTTP 直连: {e}")
+    return _http_get("stores")
 
 
 def get_store(store_id: str) -> dict:
-    """获取单个门店"""
+    for s in get_stores():
+        if s.get("id") == store_id:
+            return s
+    return {}
+
+
+def create_store(store_data: dict) -> Optional[dict]:
     client = get_client()
-    if client is None:
-        return {}
-    data = client.table("stores").select("*").eq("id", store_id).execute().data
-    return data[0] if data else {}
+    if client is not None:
+        try:
+            data = client.table("stores").insert(store_data).execute().data
+            if data:
+                return data[0]
+        except Exception as e:
+            warnings.warn(f"SDK 插入失败，HTTP 直连: {e}")
+    result = _http_post("stores", store_data)
+    return result[0] if result else None
 
 
-def create_store(store_data: dict) -> dict | None:
-    """创建门店，返回新门店数据，无连接时返回 None"""
+def update_store(store_id: str, store_data: dict) -> Optional[dict]:
     client = get_client()
-    if client is None:
-        warnings.warn("Supabase 未配置，无法创建门店")
-        return None
-    data = client.table("stores").insert(store_data).execute().data
-    return data[0] if data else {}
-
-
-def update_store(store_id: str, store_data: dict) -> dict | None:
-    """更新门店，返回更新后数据，无连接时返回 None"""
-    client = get_client()
-    if client is None:
-        warnings.warn("Supabase 未配置，无法更新门店")
-        return None
-    data = (
-        client.table("stores")
-        .update(store_data)
-        .eq("id", store_id)
-        .execute()
-        .data
-    )
-    return data[0] if data else {}
+    if client is not None:
+        try:
+            data = (
+                client.table("stores")
+                .update(store_data)
+                .eq("id", store_id)
+                .execute()
+                .data
+            )
+            if data:
+                return data[0]
+        except Exception as e:
+            warnings.warn(f"SDK 更新失败，HTTP 直连: {e}")
+    result = _http_patch(f"stores?id=eq.{store_id}", store_data)
+    return result[0] if result else None
 
 
 def get_employees(store_id: str) -> list:
-    """获取门店员工列表"""
     client = get_client()
-    if client is None:
-        return []
-    return client.table("employees").select("*").eq("store_id", store_id).execute().data or []
+    if client is not None:
+        try:
+            return (
+                client.table("employees")
+                .select("*")
+                .eq("store_id", store_id)
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            pass
+    return _http_get(f"employees?store_id=eq.{store_id}")
 
 
 def create_employee(employee_data: dict) -> dict:
-    """创建员工"""
     client = get_client()
-    if client is None:
-        return {}
-    data = client.table("employees").insert(employee_data).execute().data
-    return data[0] if data else {}
+    if client is not None:
+        try:
+            data = client.table("employees").insert(employee_data).execute().data
+            return data[0] if data else {}
+        except Exception:
+            pass
+    result = _http_post("employees", employee_data)
+    return result[0] if result else {}
 
 
 def save_schedule(schedule_data: dict) -> dict:
-    """保存排班方案"""
     client = get_client()
-    if client is None:
-        return {}
-    data = client.table("schedules").insert(schedule_data).execute().data
-    return data[0] if data else {}
+    if client is not None:
+        try:
+            data = client.table("schedules").insert(schedule_data).execute().data
+            return data[0] if data else {}
+        except Exception:
+            pass
+    result = _http_post("schedules", schedule_data)
+    return result[0] if result else {}
 
 
 def get_schedules(store_id: str) -> list:
-    """获取门店排班方案列表"""
     client = get_client()
-    if client is None:
-        return []
-    return (
-        client.table("schedules")
-        .select("*")
-        .eq("store_id", store_id)
-        .order("week_start", desc=True)
-        .execute()
-        .data
-        or []
-    )
+    if client is not None:
+        try:
+            return (
+                client.table("schedules")
+                .select("*")
+                .eq("store_id", store_id)
+                .order("week_start", desc=True)
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            pass
+    return _http_get(f"schedules?store_id=eq.{store_id}&order=week_start.desc")
 
 
 def save_shifts(shifts_data: list) -> list:
-    """批量保存排班明细"""
     client = get_client()
-    if client is None:
+    if client is not None:
+        try:
+            return client.table("schedule_shifts").insert(shifts_data).execute().data or []
+        except Exception:
+            pass
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
         return []
-    return client.table("schedule_shifts").insert(shifts_data).execute().data or []
+    body = json.dumps(shifts_data).encode()
+    url = f"{_SUPABASE_URL.rstrip('/')}/rest/v1/schedule_shifts"
+    req = Request(url, data=body, method="POST", headers={
+        "apikey": _SUPABASE_KEY, "Authorization": f"Bearer {_SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    })
+    try:
+        with urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode()) or []
+    except Exception:
+        return []
 
 
 def save_review(review_data: dict) -> dict:
-    """保存复盘记录"""
     client = get_client()
-    if client is None:
-        return {}
-    data = client.table("weekly_reviews").insert(review_data).execute().data
-    return data[0] if data else {}
+    if client is not None:
+        try:
+            data = client.table("weekly_reviews").insert(review_data).execute().data
+            return data[0] if data else {}
+        except Exception:
+            pass
+    result = _http_post("weekly_reviews", review_data)
+    return result[0] if result else {}
