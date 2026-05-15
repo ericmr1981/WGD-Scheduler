@@ -307,7 +307,7 @@ if st.button("🔨 生成排班方案", type="primary"):
                     {"name":"产量","type":"line","data":[int(v) for v in df["产量"]],"smooth":True,"symbol":"none","lineStyle":{"width":2,"color":"#ff7f0e"}},
                 ]}
                 if pv > 0: o["series"].append({"name":"峰值","type":"line","data":[pv]*len(df),"symbol":"none","lineStyle":{"width":2,"color":"#e74c3c","type":"dashed"}})
-                st_echarts(options=o, height="180px", key=f"c_{label[:4]}_a")
+                st_echarts(options=o, height="180px", key=f"sc_{id(sch)%10000}_a")
             st.caption("平日(周三)")
         with cb:
             df = _dc("周六")
@@ -318,7 +318,7 @@ if st.button("🔨 生成排班方案", type="primary"):
                     {"name":"产量","type":"line","data":[int(v) for v in df["产量"]],"smooth":True,"symbol":"none","lineStyle":{"width":2,"color":"#ff7f0e"}},
                 ]}
                 if pv > 0: o["series"].append({"name":"峰值","type":"line","data":[pv]*len(df),"symbol":"none","lineStyle":{"width":2,"color":"#e74c3c","type":"dashed"}})
-                st_echarts(options=o, height="180px", key=f"c_{label[:4]}_b")
+                st_echarts(options=o, height="180px", key=f"sc_{id(sch)%10000}_b")
             st.caption("周末(周六)")
         df_r = _dc("周三")
         tc = df_r["产量"].sum() if not df_r.empty else 0
