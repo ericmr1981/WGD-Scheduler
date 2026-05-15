@@ -407,11 +407,45 @@ if st.button("🔨 生成排班方案", type="primary"):
     col_a, col_b = st.columns(2)
     with col_a:
         df_wd = _day_curve("周三")
-        st.line_chart(df_wd, height=250, use_container_width=True)
+        peak_wd = max(df_wd["客流需求"].max(), df_wd["员工产量"].max())
+        st_echarts(options={
+            "tooltip": {"trigger": "axis"},
+            "legend": {"data": ["客流需求", "员工产量", "小时峰值"], "top": 0, "textStyle": {"fontSize": 10}},
+            "grid": {"left": 40, "right": 10, "top": 30, "bottom": 30},
+            "xAxis": {"type": "category", "data": list(df_wd.index), "axisLabel": {"fontSize": 8}},
+            "yAxis": {"type": "value", "name": "单/30min", "fontSize": 10},
+            "series": [
+                {"name": "客流需求", "type": "line", "data": list(df_wd["客流需求"]),
+                 "symbol": "none", "lineStyle": {"width": 2, "color": "#1f77b4"}},
+                {"name": "员工产量", "type": "line", "data": list(df_wd["员工产量"]),
+                 "symbol": "none", "lineStyle": {"width": 2, "color": "#ff7f0e"}},
+                {"name": "小时峰值", "type": "line",
+                 "data": [peak_wd] * len(df_wd),
+                 "symbol": "none", "lineStyle": {"width": 2, "color": "#e74c3c", "type": "dashed"},
+                 "z": 1},
+            ],
+        }, height="250px")
         st.caption("📅 平日（周三）")
     with col_b:
         df_we = _day_curve("周六")
-        st.line_chart(df_we, height=250, use_container_width=True)
+        peak_we = max(df_we["客流需求"].max(), df_we["员工产量"].max())
+        st_echarts(options={
+            "tooltip": {"trigger": "axis"},
+            "legend": {"data": ["客流需求", "员工产量", "小时峰值"], "top": 0, "textStyle": {"fontSize": 10}},
+            "grid": {"left": 40, "right": 10, "top": 30, "bottom": 30},
+            "xAxis": {"type": "category", "data": list(df_we.index), "axisLabel": {"fontSize": 8}},
+            "yAxis": {"type": "value", "name": "单/30min", "fontSize": 10},
+            "series": [
+                {"name": "客流需求", "type": "line", "data": list(df_we["客流需求"]),
+                 "symbol": "none", "lineStyle": {"width": 2, "color": "#1f77b4"}},
+                {"name": "员工产量", "type": "line", "data": list(df_we["员工产量"]),
+                 "symbol": "none", "lineStyle": {"width": 2, "color": "#ff7f0e"}},
+                {"name": "小时峰值", "type": "line",
+                 "data": [peak_we] * len(df_we),
+                 "symbol": "none", "lineStyle": {"width": 2, "color": "#e74c3c", "type": "dashed"},
+                 "z": 1},
+            ],
+        }, height="250px")
         st.caption("📅 周末（周六）")
 
     # 计算参考数值（用周三数据）
