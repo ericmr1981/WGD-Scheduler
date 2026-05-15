@@ -343,47 +343,51 @@ if st.button("🔨 生成排班方案", type="primary"):
     st.markdown("#### 📅 每日班次甘特图")
     cov_gs = int(min(s.start for s in shifts))
     cov_ge = int(max(s.end for s in shifts))
-    _HC = {"A": "#4caf50", "B": "#2196f3", "C": "#ff9800"}
+    cov_range = cov_ge - cov_gs
+    _GC = {"A": "#4caf50", "B": "#2196f3", "C": "#ff9800"}
     for day in week_days:
-        hours_axis = list(range(cov_gs, cov_ge))
-        heat_data: list[list] = []
-        for ei, emp in enumerate(emp_names):
-            row = []
-            for h in hours_axis:
-                sn = schedule_by_emp[emp][day]
-                s = shift_map.get(sn) if sn else None
-                if s and s.start <= h < s.end:
-                    row.append(["A", "B", "C"].index(sn) + 1 if sn in ("A", "B", "C") else 0)
-                else:
-                    row.append(0)
-            heat_data.append(row)
+        bars_html = ""
+        for emp in emp_names:
+            sn = schedule_by_emp[emp][day]
+            if sn is None:
+                bars_html += f"""
+                <div style="display:flex;align-items:center;height:26px;margin:2px 0">
+                    <span style="width:50px;font-size:12px;flex-shrink:0">{emp}</span>
+                    <div style="height:22px;width:100%;background:#eee;border-radius:4px;
+                                display:flex;align-items:center;justify-content:center;font-size:10px;color:#999">休息</div>
+                </div>"""
+            else:
+                s = shift_map.get(sn)
+                if not s:
+                    continue
+                offset_pct = (s.start - cov_gs) / cov_range * 100
+                width_pct = (s.end - s.start) / cov_range * 100
+                color = _GC.get(sn, "#666")
+                bars_html += f"""
+                <div style="display:flex;align-items:center;height:26px;margin:2px 0">
+                    <span style="width:50px;font-size:12px;flex-shrink:0">{emp}</span>
+                    <div style="flex:1;height:22px;background:#f0f0f0;border-radius:4px;position:relative">
+                        <div style="position:absolute;left:{offset_pct:.1f}%;width:{width_pct:.1f}%;height:100%;
+                                    background:{color};border-radius:4px;display:flex;align-items:center;
+                                    justify-content:center;font-size:10px;color:#fff;font-weight:bold">
+                            {sn}班 {_fmt(s.start)}-{_fmt(s.end)}
+                        </div>
+                    </div>
+                </div>"""
 
-        st_echarts(options={
-            "tooltip": {
-                "position": "top",
-                "formatter": f"function(p){{var m={{1:'A班',2:'B班',3:'C班'}};return p.name+'&nbsp;'+m[p.value[2]]||'休息'}}"
-            },
-            "grid": {"left": 40, "right": 5, "top": 5, "bottom": 30},
-            "xAxis": {"type": "category", "data": [f"{h}:00" for h in hours_axis],
-                      "axisLabel": {"fontSize": 9, "interval": 1}},
-            "yAxis": {"type": "category", "data": emp_names, "axisLabel": {"fontSize": 10}},
-            "visualMap": {
-                "min": 0, "max": 3,
-                "inRange": {"color": ["#f5f5f5", "#4caf50", "#2196f3", "#ff9800"]},
-                "show": False,
-            },
-            "series": [{
-                "type": "heatmap", "data": [
-                    [hi, ei, heat_data[ei][hi]]
-                    for ei in range(len(emp_names))
-                    for hi in range(len(hours_axis))
-                ],
-                "label": {"show": True, "fontSize": 10,
-                          "formatter": "function(p){var m={1:'A',2:'B',3:'C'};return m[p.value[2]]||''}"},
-                "emphasis": {"itemStyle": {"shadowBlur": 10, "shadowColor": "rgba(0,0,0,0.5)"}},
-            }],
-        }, height=f"{50 + len(emp_names) * 35}px", key=f"hm_{day}")
-        st.caption(f"📅 {day}  🟢A班  🔵B班  🟠C班  ⬜休息")
+        st.markdown(f"""
+        <div style="margin:8px 0">
+            <div style="display:flex;font-size:10px;color:#888;margin:0 0 2px 50px">
+                <span style="flex:1;text-align:left">{_fmt(cov_gs)}</span>
+                <span style="flex:1;text-align:center">{_fmt((cov_gs+cov_ge)/2)}</span>
+                <span style="flex:1;text-align:right">{_fmt(cov_ge)}</span>
+            </div>
+            {bars_html}
+            <div style="font-size:10px;color:#888;margin-top:4px">
+                🟢 A班 &nbsp; 🔵 B班 &nbsp; 🟠 C班 &nbsp; ⬜ 休息 &nbsp; | {day}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # ─── 产能曲线与参考数值 ──────────────────────────────────────
     st.markdown("### 📊 产能拟合曲线")
