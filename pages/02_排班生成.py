@@ -121,7 +121,8 @@ st_echarts(options={
         "data": times,
         "axisLabel": {"rotate": 45, "fontSize": 10},
     },
-    "yAxis": {"type": "value", "name": "客流量"},
+    "yAxis": {"type": "value", "name": "客流量",
+              "max": max(max(wd_vals), max(we_vals)) * 1.5},
     "series": [
         {"name": "平日客流", "type": "bar", "data": wd_vals,
          "itemStyle": {"color": "#1f77b4"}},
@@ -434,7 +435,9 @@ if st.button("🔨 生成排班方案", type="primary"):
             "type": "category", "data": [d["time"] for d in prod_curve],
             "axisLabel": {"rotate": 45, "fontSize": 10},
         },
-        "yAxis": {"type": "value", "name": "单/30min"},
+        "yAxis": {"type": "value", "name": "单/30min",
+                  "max": max(max(d["demand"] for d in prod_curve),
+                             max(d["production"] for d in prod_curve)) * 1.5},
         "series": [
             {"name": "客流需求", "type": "bar", "data": [d["demand"] for d in prod_curve],
              "itemStyle": {"color": "#1f77b4"}},
