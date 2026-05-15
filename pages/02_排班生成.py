@@ -397,54 +397,46 @@ if st.button("🔨 生成排班方案", type="primary"):
         st.markdown(f"**{day}** | {' | '.join(parts)}")
 
     # ─── 产能曲线与参考数值 ──────────────────────────────────────
-    st.markdown("### 📊 产能拟合曲线（周三为例）")
+    st.markdown("### 📊 产能拟合曲线")
 
-    # 计算 shift_covers
-    all_slot_times = sorted(demand_30min.get("周三", {}).keys())
-    shift_covers_local: dict[str, set[str]] = {}
-    for s in shifts:
-        covered: set[str] = set()
-        for t in all_slot_times:
-            h_str, m_str = t.split(":")
-            tv = int(h_str) + int(m_str) / 60
-            if s.start <= tv < s.end:
-                covered.add(t)
-        shift_covers_local[s.name] = covered
+    def _day_curve(day_name: str) -> pd.DataFrame:
+        slots = sorted(demand_30min.get(day_name, {}).keys())
+        shift_covers_local: dict[str, set[str]] = {}
+        for s in shifts:
+            covered: set[str] = set()
+            for t in slots:
+                h_str, m_str = t.split(":")
+                tv = int(h_str) + int(m_str) / 60
+                if s.start <= tv < s.end:
+                    covered.add(t)
+            shift_covers_local[s.name] = covered
 
-    prod_curve = []
-    total_capacity_units = 0.0
-    total_demand_units = 0.0
+        rows = []
+        for t in slots:
+            staff = sum(
+                1 for emp in emp_names
+                if schedule_by_emp[emp].get(day_name)
+                and t in shift_covers_local.get(schedule_by_emp[emp][day_name], set())
+            )
+            demand = demand_30min.get(day_name, {}).get(t, 0)
+            prod = staff * productivity
+            rows.append({"time": t, "客流需求": demand, "员工产量": prod})
+        return pd.DataFrame(rows).set_index("time")
 
-    for t in all_slot_times:
-        staff = sum(
-            1 for emp in emp_names
-            if schedule_by_emp[emp].get("周三")
-            and t in shift_covers_local.get(schedule_by_emp[emp]["周三"], set())
-        )
-        demand = demand_30min.get("周三", {}).get(t, 0)
-        prod = staff * productivity
-        prod_curve.append({"time": t, "demand": demand, "production": prod})
-        total_capacity_units += prod * 0.5
-        total_demand_units += demand * 0.5
+    col_a, col_b = st.columns(2)
+    with col_a:
+        df_wd = _day_curve("周三")
+        st.line_chart(df_wd, height=250, use_container_width=True)
+        st.caption("📅 平日（周三）")
+    with col_b:
+        df_we = _day_curve("周六")
+        st.line_chart(df_we, height=250, use_container_width=True)
+        st.caption("📅 周末（周六）")
 
-    st_echarts(options={
-        "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
-        "legend": {"data": ["客流需求", "员工总产量"], "top": 0},
-        "grid": {"left": 50, "right": 20, "top": 40, "bottom": 50},
-        "xAxis": {
-            "type": "category", "data": [d["time"] for d in prod_curve],
-            "axisLabel": {"rotate": 45, "fontSize": 10},
-        },
-        "yAxis": {"type": "value", "name": "单/30min",
-                  "max": max(max(d["demand"] for d in prod_curve),
-                             max(d["production"] for d in prod_curve)) * 1.5},
-        "series": [
-            {"name": "客流需求", "type": "bar", "data": [d["demand"] for d in prod_curve],
-             "itemStyle": {"color": "#1f77b4"}},
-            {"name": "员工总产量", "type": "bar", "data": [d["production"] for d in prod_curve],
-             "itemStyle": {"color": "#ff7f0e"}},
-        ],
-    }, height="300px")
+    # 计算参考数值（用周三数据）
+    df_ref = _day_curve("周三")
+    total_capacity_units = df_ref["员工产量"].sum() * 0.5
+    total_demand_units = df_ref["客流需求"].sum() * 0.5
 
     # 参考数值
     st.markdown("### 📈 产能利用率")
