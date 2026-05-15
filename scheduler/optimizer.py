@@ -42,8 +42,9 @@ def optimize_schedule(
     min_staff: int = 1,
     peak_hourly_customers: int = 0,
     peak_periods: dict[str, str] | None = None,
+    num_solutions: int = 3,
     time_limit_seconds: int = 10,
-) -> dict[str, Any]:
+) -> list[dict[str, Any]]:
     """
     使用 CP-SAT 求解最优排班方案。
 
@@ -259,52 +260,53 @@ def optimize_schedule(
             model.Add(peak_gap_total == sum(peak_gaps))
 
     _REST_FAIRNESS_WEIGHT = 100
-    model.Minimize(_GAP_WEIGHT * total_gap + _PEAK_WEIGHT * peak_gap_total + _REST_FAIRNESS_WEIGHT * rest_range + shift_type_count)
+    obj_expr = _GAP_WEIGHT * total_gap + _PEAK_WEIGHT * peak_gap_total + _REST_FAIRNESS_WEIGHT * rest_range + shift_type_count
+    model.Minimize(obj_expr)
 
-    # ── 求解 ─────────────────────────────────────────────────────
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = time_limit_seconds
-    status = solver.Solve(model)
-
-    # ── 处理结果 ─────────────────────────────────────────────────
-    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+    def _extract(slv: cp_model.CpSolver) -> dict:
         schedule: dict[str, dict[str, str | None]] = {}
         for e, emp in enumerate(emp_names):
             schedule[emp] = {}
             for d, day in enumerate(week_days):
-                val = solver.Value(shift_var[(e, d)])
+                val = slv.Value(shift_var[(e, d)])
                 schedule[emp][day] = None if val == 0 else shift_names[val - 1]
-
-        coverage_report: list[dict] = []
+        coverage_report = []
         for d, day in enumerate(week_days):
-            slots_report: list[dict] = []
+            slots_report = []
             for t in all_slot_times:
                 demand = demand_30min.get(day, {}).get(t, 0)
                 staff_count = sum(
-                    1 for e in range(num_emps)
-                    for n in shift_names
-                    if t in shift_covers.get(n, set())
-                    and solver.Value(is_shift_type[n][(e, d)]) == 1
+                    1 for e in range(num_emps) for n in shift_names
+                    if t in shift_covers.get(n, set()) and slv.Value(is_shift_type[n][(e, d)]) == 1
                 )
                 gap = max(0, demand - staff_count * productivity)
                 if demand > 0 or staff_count > 0:
-                    slots_report.append({
-                        "time": t, "staff": staff_count,
-                        "demand": demand, "gap": gap,
-                    })
+                    slots_report.append({"time": t, "staff": staff_count, "demand": demand, "gap": gap})
             coverage_report.append({"day": day, "slots": slots_report})
+        return {"schedule": schedule, "gap_total": slv.Value(total_gap),
+                "shift_types_used": slv.Value(shift_type_count), "coverage_report": coverage_report}
 
-        status_str = "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE"
-        return {
-            "status": status_str,
-            "schedule": schedule,
-            "gap_total": solver.Value(total_gap),
-            "shift_types_used": solver.Value(shift_type_count),
-            "coverage_report": coverage_report,
-        }
-    elif status == cp_model.INFEASIBLE:
-        return {"status": "INFEASIBLE", "schedule": {}, "gap_total": -1,
-                "shift_types_used": -1, "coverage_report": []}
-    else:
-        return {"status": "ERROR", "schedule": {}, "gap_total": -1,
-                "shift_types_used": -1, "coverage_report": []}
+    # ── 求解（多次，收集 top N）─────────────────────────────────
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = time_limit_seconds
+    results: list[dict] = []
+
+    for sol_idx in range(num_solutions):
+        status = solver.Solve(model)
+        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            sol = _extract(solver)
+            sol["status"] = "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE"
+            sol["objective"] = int(solver.ObjectiveValue())
+            results.append(sol)
+            if sol_idx < num_solutions - 1:
+                model.Add(obj_expr > int(solver.ObjectiveValue()))
+        else:
+            break
+
+    if results:
+        return results
+    if status == cp_model.INFEASIBLE:
+        return [{"status": "INFEASIBLE", "schedule": {}, "gap_total": -1,
+                 "shift_types_used": -1, "coverage_report": []}]
+    return [{"status": "ERROR", "schedule": {}, "gap_total": -1,
+             "shift_types_used": -1, "coverage_report": []}]
