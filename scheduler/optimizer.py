@@ -40,6 +40,8 @@ def optimize_schedule(
     productivity: int,
     demand_30min: dict[str, dict[str, int]],
     min_staff: int = 1,
+    peak_hourly_customers: int = 0,
+    peak_periods: dict[str, str] | None = None,
     time_limit_seconds: int = 10,
 ) -> dict[str, Any]:
     """
@@ -52,6 +54,8 @@ def optimize_schedule(
         productivity: 单人每小时产能
         demand_30min: {day: {time_str: 预估客流}}
         min_staff: 任何时段最低在岗人数
+        peak_hourly_customers: 本周高峰每小时客流量。传入后高峰期产能缺口权重视为 500
+        peak_periods: 高峰时段定义 {"weekday_lunch":"12:00-14:00", ...}，与门店配置一致
         time_limit_seconds: 求解时间上限
 
     Returns:
@@ -201,8 +205,61 @@ def optimize_schedule(
     model.Add(shift_type_count == sum(uses_shift.values()))
 
     # ── 组合目标 ─────────────────────────────────────────────────
+    # ── 软约束：高峰产能缺口（权重 500）──────────────────────────
+    _PEAK_WEIGHT = 500
+    peak_gap_total = 0
+    if peak_hourly_customers > 0 and peak_periods:
+        # 解析高峰时段 {"weekday_lunch":"12:00-14:00", ...}
+        def _in_peak(t: str, day_name: str) -> bool:
+            h = int(t.split(":")[0])
+            m = int(t.split(":")[1])
+            tv = h + m / 60
+            is_we = day_name in {"周六", "周日"}
+            if is_we:
+                ranges = [
+                    peak_periods.get("weekend_lunch", "11:00-14:00"),
+                    peak_periods.get("weekend_dinner", "16:00-20:00"),
+                ]
+            else:
+                ranges = [
+                    peak_periods.get("weekday_lunch", "12:00-14:00"),
+                    peak_periods.get("weekday_dinner", "17:00-19:00"),
+                ]
+            for r in ranges:
+                parts = r.replace("：", ":").replace("－", "-").replace("—", "-").split("-")
+                try:
+                    sh = int(parts[0].split(":")[0])
+                    eh = int(parts[1].split(":")[0])
+                    if sh <= tv < eh:
+                        return True
+                except (IndexError, ValueError):
+                    pass
+            return False
+
+        peak_gaps: list[cp_model.IntVar] = []
+        for d in range(num_days):
+            day_name = week_days[d]
+            slot_list = sorted(demand_30min.get(day_name, {}).keys())
+            for t in slot_list:
+                if not _in_peak(t, day_name):
+                    continue
+                demand = demand_30min[day_name][t]
+                staff_expr = _staff_on_duty(d, t, is_shift_type, shift_covers, shift_names, num_emps)
+                # 高峰时段要求的产能: peak_hourly_customers / 2 (30min)
+                # gap >= peak_30min - staff_expr * productivity / 2
+                # 2*gap >= peak_hourly_customers - staff_expr * productivity
+                needed = peak_hourly_customers  # 每小时
+                pg = model.NewIntVar(0, needed, f"pg_{d}_{t.replace(':','_')}")
+                model.Add(2 * pg >= needed - staff_expr * productivity)
+                peak_gaps.append(pg)
+
+        if peak_gaps:
+            pg_max = peak_hourly_customers * len(peak_gaps)
+            peak_gap_total = model.NewIntVar(0, pg_max, "peak_gap_total")
+            model.Add(peak_gap_total == sum(peak_gaps))
+
     _REST_FAIRNESS_WEIGHT = 100
-    model.Minimize(_GAP_WEIGHT * total_gap + _REST_FAIRNESS_WEIGHT * rest_range + shift_type_count)
+    model.Minimize(_GAP_WEIGHT * total_gap + _PEAK_WEIGHT * peak_gap_total + _REST_FAIRNESS_WEIGHT * rest_range + shift_type_count)
 
     # ── 求解 ─────────────────────────────────────────────────────
     solver = cp_model.CpSolver()
