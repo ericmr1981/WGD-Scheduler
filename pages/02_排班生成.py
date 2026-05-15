@@ -18,6 +18,12 @@ except ImportError:
 
 st.set_page_config(page_title="排班生成", page_icon="📋")
 
+# 求解器状态（仅排班页显示）
+if _HAVE_OPTIMIZER:
+    st.caption("⚙️ 求解器: CP-SAT (ortools)")
+else:
+    st.caption("⚙️ 求解器: 规则算法 (fallback)")
+
 st.title("📋 排班生成")
 st.markdown("输入日均客流量，自动生成30分钟颗粒度客流分布图和排班方案。")
 
