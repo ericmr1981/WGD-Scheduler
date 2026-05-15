@@ -179,8 +179,11 @@ def optimize_schedule(
             demand = demand_30min[day_name][t]
             total_demand += demand
             staff_expr = _staff_on_duty(d, t, is_shift_type, shift_covers, shift_names, num_emps)
+            # 产能每小时 → 30分钟: staff_expr * productivity / 2
+            # gap >= demand - staff_expr * productivity / 2
+            # → 2*gap >= 2*demand - staff_expr * productivity
             gap = model.NewIntVar(0, demand, f"gap_{d}_{t.replace(':','_')}")
-            model.Add(gap >= demand - staff_expr * productivity)
+            model.Add(2 * gap >= 2 * demand - staff_expr * productivity)
             gap_vars.append(gap)
 
     total_gap = model.NewIntVar(0, total_demand, "total_gap")
