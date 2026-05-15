@@ -155,6 +155,20 @@ def optimize_schedule(
         model.Add(work_days == sum(1 - is_rest[(e, d)] for d in range(num_days)))
         model.Add(work_days == num_days - 1)  # 7 天工作 6 天，休息恰好 1 天
 
+    # 6. 休息日均匀分布（工作日休息人数方差最小）
+    weekday_rests: list[cp_model.IntVar] = []
+    for d in range(min(5, num_days)):  # 周一到周五
+        r = model.NewIntVar(0, num_emps, f"rest_cnt_{d}")
+        model.Add(r == sum(is_rest[(e, d)] for e in range(num_emps)))
+        weekday_rests.append(r)
+    max_rest = model.NewIntVar(0, num_emps, "max_rest")
+    min_rest = model.NewIntVar(0, num_emps, "min_rest")
+    for r in weekday_rests:
+        model.Add(max_rest >= r)
+        model.Add(min_rest <= r)
+    rest_range = model.NewIntVar(0, num_emps, "rest_range")
+    model.Add(rest_range == max_rest - min_rest)
+
     # ── 软约束：产能缺口 ────────────────────────────────────────
     gap_vars: list[cp_model.IntVar] = []
     total_demand = 0
@@ -184,7 +198,8 @@ def optimize_schedule(
     model.Add(shift_type_count == sum(uses_shift.values()))
 
     # ── 组合目标 ─────────────────────────────────────────────────
-    model.Minimize(_GAP_WEIGHT * total_gap + shift_type_count)
+    _REST_FAIRNESS_WEIGHT = 100
+    model.Minimize(_GAP_WEIGHT * total_gap + _REST_FAIRNESS_WEIGHT * rest_range + shift_type_count)
 
     # ── 求解 ─────────────────────────────────────────────────────
     solver = cp_model.CpSolver()
