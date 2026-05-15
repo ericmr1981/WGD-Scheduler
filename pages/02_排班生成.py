@@ -106,15 +106,31 @@ weekend_dist = estimate_half_hourly_customers(
     base_customers, day_name="周六", peak_periods=peak_periods,
 )
 
-col_l, col_r = st.columns(2)
-with col_l:
-    df1 = pd.DataFrame({"客流": [d["customers"] for d in weekday_dist]}, index=[d["time"] for d in weekday_dist])
-    st.bar_chart(df1, height=250, use_container_width=True)
-    st.caption("📅 平日（周三）")
-with col_r:
-    df2 = pd.DataFrame({"客流": [d["customers"] for d in weekend_dist]}, index=[d["time"] for d in weekend_dist])
-    st.bar_chart(df2, height=250, use_container_width=True)
-    st.caption("📅 周末（周六）")
+from streamlit_echarts import st_echarts
+
+times = [d["time"] for d in weekday_dist]
+wd_vals = [d["customers"] for d in weekday_dist]
+we_vals = [d["customers"] for d in weekend_dist]
+
+st_echarts(options={
+    "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
+    "legend": {"data": ["平日客流", "周末客流"], "top": 0},
+    "grid": {"left": 50, "right": 20, "top": 40, "bottom": 50},
+    "xAxis": {
+        "type": "category",
+        "data": times,
+        "axisLabel": {"rotate": 45, "fontSize": 10,
+                      "formatter": "function(v){return v.endsWith(':00')?v:''}"},
+    },
+    "yAxis": {"type": "value", "name": "客流量"},
+    "series": [
+        {"name": "平日客流", "type": "bar", "data": wd_vals,
+         "itemStyle": {"color": "#1f77b4"}},
+        {"name": "周末客流", "type": "bar", "data": we_vals,
+         "itemStyle": {"color": "#ff7f0e"}},
+    ],
+}, height="350px")
+st.caption("📊 平日（周三）vs 周末（周六）客流对比，30分钟颗粒度，蓝色=平日 橙色=周末")
 
 if peak_periods:
     cols = st.columns(2)
@@ -411,14 +427,23 @@ if st.button("🔨 生成排班方案", type="primary"):
         total_capacity_units += prod * 0.5
         total_demand_units += demand * 0.5
 
-    prod_df = pd.DataFrame(prod_curve).set_index("time")
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.bar_chart(prod_df[["demand"]], height=250, use_container_width=True)
-        st.caption("📊 客流需求")
-    with col_b:
-        st.bar_chart(prod_df[["production"]], height=250, use_container_width=True)
-        st.caption("🏭 员工总产量")
+    st_echarts(options={
+        "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
+        "legend": {"data": ["客流需求", "员工总产量"], "top": 0},
+        "grid": {"left": 50, "right": 20, "top": 40, "bottom": 50},
+        "xAxis": {
+            "type": "category", "data": [d["time"] for d in prod_curve],
+            "axisLabel": {"rotate": 45, "fontSize": 10,
+                          "formatter": "function(v){return v.endsWith(':00')?v:''}"},
+        },
+        "yAxis": {"type": "value", "name": "单/30min"},
+        "series": [
+            {"name": "客流需求", "type": "bar", "data": [d["demand"] for d in prod_curve],
+             "itemStyle": {"color": "#1f77b4"}},
+            {"name": "员工总产量", "type": "bar", "data": [d["production"] for d in prod_curve],
+             "itemStyle": {"color": "#ff7f0e"}},
+        ],
+    }, height="300px")
 
     # 参考数值
     st.markdown("### 📈 产能利用率")
