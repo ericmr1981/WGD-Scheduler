@@ -400,7 +400,7 @@ if st.button("🔨 生成排班方案", type="primary"):
                 and t in shift_covers_local.get(schedule_by_emp[emp][day_name], set())
             )
             demand = demand_30min.get(day_name, {}).get(t, 0)
-            prod = staff * productivity
+            prod = int(staff * productivity / 2)  # 产能(h) → 30min
             rows.append({"time": t, "客流需求": demand, "员工产量": prod})
         return pd.DataFrame(rows).set_index("time")
 
@@ -408,7 +408,7 @@ if st.button("🔨 生成排班方案", type="primary"):
     with col_a:
         df_wd = _day_curve("周三")
         if not df_wd.empty:
-            pd_wd = max(float(df_wd["客流需求"].max()), float(df_wd["员工产量"].max()))
+            pd_wd = float(df_wd["客流需求"].max())
             opts_wd = {
                 "tooltip": {"trigger": "axis"},
                 "legend": {"data": ["客流需求", "员工产量", "小时峰值"], "top": 0},
@@ -431,7 +431,7 @@ if st.button("🔨 生成排班方案", type="primary"):
     with col_b:
         df_we = _day_curve("周六")
         if not df_we.empty:
-            pd_we = max(float(df_we["客流需求"].max()), float(df_we["员工产量"].max()))
+            pd_we = float(df_we["客流需求"].max())
             opts_we = {
                 "tooltip": {"trigger": "axis"},
                 "legend": {"data": ["客流需求", "员工产量", "小时峰值"], "top": 0},
@@ -454,8 +454,8 @@ if st.button("🔨 生成排班方案", type="primary"):
 
     # 计算参考数值（用周三数据）
     df_ref = _day_curve("周三")
-    total_capacity_units = df_ref["员工产量"].sum() * 0.5
-    total_demand_units = df_ref["客流需求"].sum() * 0.5
+    total_capacity_units = df_ref["员工产量"].sum()
+    total_demand_units = df_ref["客流需求"].sum()
 
     # 参考数值
     st.markdown("### 📈 产能利用率")
