@@ -143,9 +143,11 @@ def estimate_half_hourly_customers(
     Returns:
         每30分钟客流列表
     """
-    from datetime import datetime, timedelta
+    from copy import deepcopy
 
     pattern = get_day_pattern(day_name, is_holiday)
+    # 拷贝一份，避免修改全局 DEFAULT_PATTERNS
+    pattern = deepcopy(pattern)
     adjusted_total = int(base_daily_customers * pattern.customer_multiplier)
 
     # 如果提供了自定义高峰时段，覆盖默认 pattern
