@@ -339,23 +339,51 @@ if st.button("🔨 生成排班方案", type="primary"):
     df_schedule = pd.DataFrame(table_data, index=emp_names)
     st.dataframe(df_schedule, use_container_width=True)
 
-    # 按班次汇总
-    st.markdown("#### 👥 各班次人员分布")
+    # ─── 每日班次甘特图 ────────────────────────────────────────
+    st.markdown("#### 📅 每日班次甘特图")
+    cov_gs = int(min(s.start for s in shifts))
+    cov_ge = int(max(s.end for s in shifts))
+    _HC = {"A": "#4caf50", "B": "#2196f3", "C": "#ff9800"}
     for day in week_days:
-        groups: dict[str, list[str]] = {}
-        for emp in emp_names:
-            sn = schedule_by_emp[emp][day]
-            groups.setdefault(sn if sn else "休息", []).append(emp)
+        hours_axis = list(range(cov_gs, cov_ge))
+        heat_data: list[list] = []
+        for ei, emp in enumerate(emp_names):
+            row = []
+            for h in hours_axis:
+                sn = schedule_by_emp[emp][day]
+                s = shift_map.get(sn) if sn else None
+                if s and s.start <= h < s.end:
+                    row.append(["A", "B", "C"].index(sn) + 1 if sn in ("A", "B", "C") else 0)
+                else:
+                    row.append(0)
+            heat_data.append(row)
 
-        parts = []
-        for k, v in sorted(groups.items()):
-            if k == "休息":
-                parts.append(f"休息：{'、'.join(v)}")
-            else:
-                s = shift_map.get(k)
-                ts = f"({_fmt(s.start)}-{_fmt(s.end)})" if s else ""
-                parts.append(f"{k}班{ts}：{'、'.join(v)}")
-        st.markdown(f"**{day}** | {' | '.join(parts)}")
+        st_echarts(options={
+            "tooltip": {
+                "position": "top",
+                "formatter": f"function(p){{var m={{1:'A班',2:'B班',3:'C班'}};return p.name+'&nbsp;'+m[p.value[2]]||'休息'}}"
+            },
+            "grid": {"left": 40, "right": 5, "top": 5, "bottom": 30},
+            "xAxis": {"type": "category", "data": [f"{h}:00" for h in hours_axis],
+                      "axisLabel": {"fontSize": 9, "interval": 1}},
+            "yAxis": {"type": "category", "data": emp_names, "axisLabel": {"fontSize": 10}},
+            "visualMap": {
+                "min": 0, "max": 3,
+                "inRange": {"color": ["#f5f5f5", "#4caf50", "#2196f3", "#ff9800"]},
+                "show": False,
+            },
+            "series": [{
+                "type": "heatmap", "data": [
+                    [hi, ei, heat_data[ei][hi]]
+                    for ei in range(len(emp_names))
+                    for hi in range(len(hours_axis))
+                ],
+                "label": {"show": True, "fontSize": 10,
+                          "formatter": "function(p){var m={1:'A',2:'B',3:'C'};return m[p.value[2]]||''}"},
+                "emphasis": {"itemStyle": {"shadowBlur": 10, "shadowColor": "rgba(0,0,0,0.5)"}},
+            }],
+        }, height=f"{50 + len(emp_names) * 35}px", key=f"hm_{day}")
+        st.caption(f"📅 {day}  🟢A班  🔵B班  🟠C班  ⬜休息")
 
     # ─── 产能曲线与参考数值 ──────────────────────────────────────
     st.markdown("### 📊 产能拟合曲线")
