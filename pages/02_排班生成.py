@@ -408,7 +408,7 @@ if st.button("🔨 生成排班方案", type="primary"):
     with col_a:
         df_wd = _day_curve("周三")
         if not df_wd.empty:
-            pd_wd = float(df_wd["客流需求"].max())
+            pd_wd = int(peak_input / 2)  # 小时峰值 → 30分钟
             opts_wd = {
                 "tooltip": {"trigger": "axis"},
                 "legend": {"data": ["客流需求", "员工产量", "小时峰值"], "top": 0},
@@ -431,7 +431,7 @@ if st.button("🔨 生成排班方案", type="primary"):
     with col_b:
         df_we = _day_curve("周六")
         if not df_we.empty:
-            pd_we = float(df_we["客流需求"].max())
+            pd_we = int(peak_input / 2)  # 小时峰值 → 30分钟
             opts_we = {
                 "tooltip": {"trigger": "axis"},
                 "legend": {"data": ["客流需求", "员工产量", "小时峰值"], "top": 0},
