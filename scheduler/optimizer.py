@@ -149,6 +149,12 @@ def optimize_schedule(
                 duty_slots += is_shift_type[n][(e, d)] * len(shift_covers.get(n, set()))
             model.Add(duty_slots <= _MAX_SLOTS_PER_DAY)
 
+    # 5. 每人每周 ≤ 54h（最多 6 个班次）
+    for e in range(num_emps):
+        work_days = model.NewIntVar(0, num_days, f"work_days_{e}")
+        model.Add(work_days == sum(1 - is_rest[(e, d)] for d in range(num_days)))
+        model.Add(work_days <= 6)
+
     # ── 软约束：产能缺口 ────────────────────────────────────────
     gap_vars: list[cp_model.IntVar] = []
     total_demand = 0
