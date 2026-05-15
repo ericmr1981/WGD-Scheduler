@@ -5,7 +5,7 @@
 import streamlit as st
 import pandas as pd
 from scheduler.core import calculate_min_staff, calculate_staffing_requirements
-from scheduler.shifts import calculate_shifts, get_half_hourly_coverage
+from scheduler.shifts import calculate_shifts, generate_shift_pool, get_half_hourly_coverage
 from scheduler.rest_days import recommend_rest_days, validate_coverage
 from scheduler.peaks import estimate_half_hourly_customers
 from db.supabase_client import get_stores
@@ -209,30 +209,26 @@ if st.button("🔨 生成排班方案", type="primary"):
 
     st.markdown("---")
 
-    # ─── 班次结构说明（含开早/打烊/就餐）───────────────────────────
-    shifts = calculate_shifts(
-        open_hour=open_hour, close_hour=close_hour,
-        opening_prep_mins=opening_prep, closing_tasks_mins=closing_tasks,
-        meal_break_mins=meal_break, target_hours=target_hours,
-    )
+    # ─── 生成班次池（动态）───────────────────────────────────────
+    if _HAVE_OPTIMIZER:
+        shifts = generate_shift_pool(
+            open_hour=open_hour, close_hour=close_hour,
+            opening_prep_mins=opening_prep, closing_tasks_mins=closing_tasks,
+            meal_break_mins=meal_break, target_hours=target_hours,
+        )
+    else:
+        shifts = calculate_shifts(
+            open_hour=open_hour, close_hour=close_hour,
+            opening_prep_mins=opening_prep, closing_tasks_mins=closing_tasks,
+            meal_break_mins=meal_break, target_hours=target_hours,
+        )
     shift_map = {s.name: s for s in shifts}
-    a_s, a_e = shifts[0].start, shifts[0].end
-    b_s, b_e = shifts[1].start, shifts[1].end
-    c_s, c_e = shifts[2].start, shifts[2].end
-    shift_dur = a_e - a_s
-    st.markdown("### 🕐 班次结构（自动计算）")
-    prep_h = opening_prep / 60
-    close_h = closing_tasks / 60
-    st.markdown(f"""
-    | 时段 | 时间 | 说明 |
-    |------|------|------|
-    | **开早准备** | {_fmt(a_s)}~{_fmt(open_hour)} | A 班到店做开早准备 |
-    | **营业时间** | {_fmt(open_hour)}~{_fmt(close_hour)} | 正式营业，共 {close_hour - open_hour}h |
-    | **打烊收尾** | {_fmt(close_hour)}~{_fmt(c_e)} | C 班延后做打烊收尾 |
-    | **班次 A** | {_fmt(a_s)}~{_fmt(a_e)}（{shift_dur:.1f}h，含餐{meal_break}min） | 开早准备+开店+午高峰 |
-    | **班次 B** | {_fmt(b_s)}~{_fmt(b_e)}（{shift_dur:.1f}h，含餐{meal_break}min） | 午高峰+晚高峰 |
-    | **班次 C** | {_fmt(c_s)}~{_fmt(c_e)}（{shift_dur:.1f}h，含餐{meal_break}min） | 晚高峰+打烊收尾 |
-    """)
+    shift_dur = shifts[0].duration if shifts else 9.0
+    st.markdown(f"### 🕐 班次池（{len(shifts)} 个可选班次）")
+    slot_preview = ", ".join(f"{_fmt(s.start)}-{_fmt(s.end)}" for s in shifts[:5])
+    if len(shifts) > 5:
+        slot_preview += f" … +{len(shifts)-5}"
+    st.caption(f"营业范围内全部 {shift_dur:.0f}h 连续时段（30min颗粒度）: {slot_preview}")
 
     # ─── 生成排班表 ───────────────────────────────────────────────
 
@@ -386,6 +382,55 @@ if st.button("🔨 生成排班方案", type="primary"):
                 ts = f"({_fmt(s.start)}-{_fmt(s.end)})" if s else ""
                 parts.append(f"{k}班{ts}：{'、'.join(v)}")
         st.markdown(f"**{day}** | {' | '.join(parts)}")
+
+    # ─── 产能曲线与参考数值 ──────────────────────────────────────
+    st.markdown("### 📊 产能拟合曲线（周三为例）")
+
+    # 计算 shift_covers
+    all_slot_times = sorted(demand_30min.get("周三", {}).keys())
+    shift_covers_local: dict[str, set[str]] = {}
+    for s in shifts:
+        covered: set[str] = set()
+        for t in all_slot_times:
+            h_str, m_str = t.split(":")
+            tv = int(h_str) + int(m_str) / 60
+            if s.start <= tv < s.end:
+                covered.add(t)
+        shift_covers_local[s.name] = covered
+
+    prod_curve = []
+    total_capacity_units = 0.0
+    total_demand_units = 0.0
+
+    for t in all_slot_times:
+        staff = sum(
+            1 for emp in emp_names
+            if schedule_by_emp[emp].get("周三")
+            and t in shift_covers_local.get(schedule_by_emp[emp]["周三"], set())
+        )
+        demand = demand_30min.get("周三", {}).get(t, 0)
+        prod = staff * productivity
+        prod_curve.append({"time": t, "demand": demand, "production": prod})
+        total_capacity_units += prod * 0.5
+        total_demand_units += demand * 0.5
+
+    both_df = pd.DataFrame(prod_curve).set_index("time")
+    st.bar_chart(both_df, height=300, use_container_width=True)
+    st.caption("🔵 客流需求 / 🟠 员工总产量（在岗人数×单人产能）")
+
+    # 参考数值
+    st.markdown("### 📈 产能利用率")
+    utilization = (total_demand_units / total_capacity_units * 100) if total_capacity_units > 0 else 0
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("员工总产能 (日)", f"{total_capacity_units:.0f} 单",
+                  help="在岗人数×单人产能 全天累计")
+    with col2:
+        st.metric("客流量 (日)", f"{total_demand_units:.0f} 单",
+                  help="预估客流全天累计")
+    with col3:
+        st.metric("产能利用率", f"{utilization:.1f}%",
+                  help="客流÷产能，越接近100%说明拟合越好")
 
     # ─── 覆盖数据（传排班检查页）──────────────────────────────────
     half_hourly = get_half_hourly_coverage(schedule_by_emp, shifts, "周三")
