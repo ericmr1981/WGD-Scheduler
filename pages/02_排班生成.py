@@ -254,9 +254,10 @@ if st.button("🔨 生成排班方案", type="primary"):
         )
         demand_30min[day] = {d["time"]: d["customers"] for d in dist}
 
+    _ALL_SOLUTIONS: list = []
     # ── 使用 CP-SAT 求解器 ───────────────────────────────────────
     if _HAVE_OPTIMIZER:
-        result = optimize_schedule(
+        results = optimize_schedule(
             emp_names=emp_names,
             week_days=week_days,
             shifts=shifts,
@@ -265,19 +266,23 @@ if st.button("🔨 生成排班方案", type="primary"):
             min_staff=1,
             peak_hourly_customers=peak_input,
             peak_periods=peak_periods,
+            num_solutions=3,
             time_limit_seconds=10,
         )
 
-        if result["status"] == "INFEASIBLE":
+        if results[0]["status"] == "INFEASIBLE":
             st.error("⚠️ 求解器无法找到可行排班方案，请检查约束条件是否过于严格。")
             st.stop()
-        elif result["status"] == "ERROR":
+        elif results[0]["status"] == "ERROR":
             st.warning("⚠️ 求解器出错，切换到规则算法。")
             _HAVE_OPTIMIZER = False
+            schedule_by_emp = None
         else:
-            schedule_by_emp = result["schedule"]
+            schedule_by_emp = results[0]["schedule"]
+            _ALL_SOLUTIONS = results
     else:
         schedule_by_emp = None
+        _ALL_SOLUTIONS = []
 
     if not _HAVE_OPTIMIZER or schedule_by_emp is None:
         rest = recommend_rest_days(
@@ -488,6 +493,35 @@ if st.button("🔨 生成排班方案", type="primary"):
     with col3:
         st.metric("产能利用率", f"{utilization:.1f}%",
                   help="客流÷产能，越接近100%说明拟合越好")
+
+    # ─── 备选版本 ─────────────────────────────────────────────────
+    for vi, alt_sol in enumerate(_ALL_SOLUTIONS[1:], start=2):
+        with st.expander(f"📋 备选方案 #{vi}（得分: {alt_sol.get('objective', '?')}）", expanded=False):
+            alt_sch = alt_sol["schedule"]
+            alt_data = {}
+            for day in week_days:
+                col = []
+                for emp in emp_names:
+                    sn = alt_sch[emp].get(day)
+                    s = shift_map.get(sn) if sn else None
+                    col.append(f"{sn}班 ({_fmt(s.start)}-{_fmt(s.end)})" if s else "休息")
+                alt_data[day] = col
+            st.dataframe(pd.DataFrame(alt_data, index=emp_names), use_container_width=True)
+            st.caption(f"缺口: {alt_sol['gap_total']} | 班次种类: {alt_sol['shift_types_used']}")
+
+            # 甘特图（简化）
+            alt_bars = ""
+            for emp in emp_names:
+                sn = alt_sch[emp].get("周三", None)
+                s = shift_map.get(sn) if sn else None
+                if not s:
+                    alt_bars += f'<div style="display:flex;height:18px"><span style="width:30px;font-size:9px">{emp}</span><div style="flex:1;background:#eee;border-radius:2px;text-align:center;font-size:8px;color:#999;line-height:18px">休息</div></div>'
+                else:
+                    pct = (s.start - cov_gs) / cov_range * 100
+                    w = (s.end - s.start) / cov_range * 100
+                    c = _GC.get(sn, "#666")
+                    alt_bars += f'<div style="display:flex;height:18px"><span style="width:30px;font-size:9px">{emp}</span><div style="flex:1;height:16px;background:#f0f0f0;border-radius:2px;position:relative"><div style="position:absolute;left:{pct:.0f}%;width:{w:.0f}%;height:100%;background:{c};border-radius:2px;text-align:center;font-size:8px;color:#fff;line-height:16px">{sn}</div></div></div>'
+            st.markdown(f'<div>{alt_bars}<div style="font-size:8px;color:#888">周三示例 | 🟢A 🔵B 🟠C ⬜休息</div></div>', unsafe_allow_html=True)
 
     # ─── 覆盖数据（传排班检查页）──────────────────────────────────
     half_hourly = get_half_hourly_coverage(schedule_by_emp, shifts, "周三")
