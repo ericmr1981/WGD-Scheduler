@@ -106,18 +106,17 @@ weekend_dist = estimate_half_hourly_customers(
     base_customers, day_name="周六", peak_periods=peak_periods,
 )
 
-df_chart = pd.DataFrame({
-    "时间": [d["time"] for d in weekday_dist],
-    "平日客流": [d["customers"] for d in weekday_dist],
-    "周末客流": [d["customers"] for d in weekend_dist],
-})
-
-st.bar_chart(
-    df_chart.set_index("时间"),
-    height=300,
-    use_container_width=True,
-)
-st.caption("平日以周三为例，周末以周六为例，30分钟颗粒度")
+col_l, col_r = st.columns(2)
+with col_l:
+    df_wd = pd.DataFrame({"客流": [d["customers"] for d in weekday_dist]},
+                         index=[d["time"] for d in weekday_dist])
+    st.bar_chart(df_wd, height=250, use_container_width=True)
+    st.caption("📅 平日（周三）")
+with col_r:
+    df_we = pd.DataFrame({"客流": [d["customers"] for d in weekend_dist]},
+                         index=[d["time"] for d in weekend_dist])
+    st.bar_chart(df_we, height=250, use_container_width=True)
+    st.caption("📅 周末（周六）")
 
 if peak_periods:
     cols = st.columns(2)
@@ -414,9 +413,14 @@ if st.button("🔨 生成排班方案", type="primary"):
         total_capacity_units += prod * 0.5
         total_demand_units += demand * 0.5
 
-    both_df = pd.DataFrame(prod_curve).set_index("time")
-    st.bar_chart(both_df, height=300, use_container_width=True)
-    st.caption("🔵 客流需求 / 🟠 员工总产量（在岗人数×单人产能）")
+    prod_df = pd.DataFrame(prod_curve).set_index("time")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.bar_chart(prod_df[["demand"]], height=250, use_container_width=True)
+        st.caption("📊 客流需求")
+    with col_b:
+        st.bar_chart(prod_df[["production"]], height=250, use_container_width=True)
+        st.caption("🏭 员工总产量")
 
     # 参考数值
     st.markdown("### 📈 产能利用率")
