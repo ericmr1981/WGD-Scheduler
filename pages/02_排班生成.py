@@ -346,48 +346,32 @@ if st.button("🔨 生成排班方案", type="primary"):
     cov_range = cov_ge - cov_gs
     _GC = {"A": "#4caf50", "B": "#2196f3", "C": "#ff9800"}
     for day in week_days:
-        bars_html = ""
+        bars_divs = ""
         for emp in emp_names:
-            sn = schedule_by_emp[emp][day]
-            if sn is None:
-                bars_html += f"""
-                <div style="display:flex;align-items:center;height:26px;margin:2px 0">
-                    <span style="width:50px;font-size:12px;flex-shrink:0">{emp}</span>
-                    <div style="height:22px;width:100%;background:#eee;border-radius:4px;
-                                display:flex;align-items:center;justify-content:center;font-size:10px;color:#999">休息</div>
-                </div>"""
+            sn = schedule_by_emp[emp].get(day)
+            s_obj = shift_map.get(sn) if sn else None
+            if not s_obj:
+                bars_divs += '<div style="display:flex;align-items:center;height:24px">'
+                bars_divs += f'<span style="width:44px;font-size:11px">{emp}</span>'
+                bars_divs += '<div style="flex:1;height:20px;background:#ddd;border-radius:3px;text-align:center;font-size:10px;color:#888;line-height:20px">休息</div></div>'
             else:
-                s = shift_map.get(sn)
-                if not s:
-                    continue
-                offset_pct = (s.start - cov_gs) / cov_range * 100
-                width_pct = (s.end - s.start) / cov_range * 100
-                color = _GC.get(sn, "#666")
-                bars_html += f"""
-                <div style="display:flex;align-items:center;height:26px;margin:2px 0">
-                    <span style="width:50px;font-size:12px;flex-shrink:0">{emp}</span>
-                    <div style="flex:1;height:22px;background:#f0f0f0;border-radius:4px;position:relative">
-                        <div style="position:absolute;left:{offset_pct:.1f}%;width:{width_pct:.1f}%;height:100%;
-                                    background:{color};border-radius:4px;display:flex;align-items:center;
-                                    justify-content:center;font-size:10px;color:#fff;font-weight:bold">
-                            {sn}班 {_fmt(s.start)}-{_fmt(s.end)}
-                        </div>
-                    </div>
-                </div>"""
+                pct = (s_obj.start - cov_gs) / cov_range * 100
+                w = (s_obj.end - s_obj.start) / cov_range * 100
+                c = _GC.get(sn, "#666")
+                bars_divs += '<div style="display:flex;align-items:center;height:24px">'
+                bars_divs += f'<span style="width:44px;font-size:11px">{emp}</span>'
+                bars_divs += '<div style="flex:1;height:20px;background:#eee;border-radius:3px;position:relative">'
+                bars_divs += f'<div style="position:absolute;left:{pct:.0f}%;width:{w:.0f}%;height:100%;background:{c};border-radius:3px;text-align:center;font-size:10px;color:#fff;line-height:20px;font-weight:600">{sn}</div></div></div>'
 
-        st.markdown(f"""
-        <div style="margin:8px 0">
-            <div style="display:flex;font-size:10px;color:#888;margin:0 0 2px 50px">
-                <span style="flex:1;text-align:left">{_fmt(cov_gs)}</span>
-                <span style="flex:1;text-align:center">{_fmt((cov_gs+cov_ge)/2)}</span>
-                <span style="flex:1;text-align:right">{_fmt(cov_ge)}</span>
-            </div>
-            {bars_html}
-            <div style="font-size:10px;color:#888;margin-top:4px">
-                🟢 A班 &nbsp; 🔵 B班 &nbsp; 🟠 C班 &nbsp; ⬜ 休息 &nbsp; | {day}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        tl = _fmt(cov_gs)
+        tm = _fmt((cov_gs + cov_ge) / 2)
+        tr = _fmt(cov_ge)
+        html = f'<div style="margin:6px 0;font-family:sans-serif">'
+        html += f'<div style="display:flex;font-size:10px;color:#888;margin:0 0 2px 44px"><span style="flex:1">{tl}</span><span style="flex:1;text-align:center">{tm}</span><span style="flex:1;text-align:right">{tr}</span></div>'
+        html += bars_divs
+        html += f'<div style="font-size:10px;color:#888;margin-top:2px">A班 #4caf50 | B班 #2196f3 | C班 #ff9800 | {day}</div></div>'
+        st.markdown(html, unsafe_allow_html=True)
+        st.markdown("---")
 
     # ─── 产能曲线与参考数值 ──────────────────────────────────────
     st.markdown("### 📊 产能拟合曲线")
