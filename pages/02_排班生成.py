@@ -276,17 +276,23 @@ if st.button("🔨 生成排班方案", type="primary"):
                 td[day].append(f"{sn}班({_fmt(s.start)}-{_fmt(s.end)})" if s else "休息")
         st.dataframe(pd.DataFrame(td, index=emp_names), use_container_width=True)
         cov_gs = int(min(s.start for s in shifts)); cov_ge = int(max(s.end for s in shifts)); cov_r = cov_ge - cov_gs
-        st.markdown("### 每日班次甘特图")
+        st.markdown("#### 📅 每日班次甘特图")
         _gc = {"A":"#4caf50","B":"#2196f3","C":"#ff9800"}
         for day in week_days:
+            # 时间轴标尺
+            time_labels = ""
+            for h in range(cov_gs, cov_ge + 1):
+                p = (h - cov_gs) / cov_r * 100
+                time_labels += f'<span style="position:absolute;left:{p:.0f}%;font-size:8px;color:#888">{h}:00</span>'
             bars = ""
             for emp in emp_names:
                 sn = sch[emp].get(day); so = shift_map.get(sn) if sn else None
-                if not so: bars += f'<div style=display:flex;height:18px><span style=width:30px;font-size:9px>{emp}</span><div style=flex:1;height:14px;background:#eee;border-radius:2px;text-align:center;font-size:8px;color:#999;line-height:14px>休息</div></div>'
+                if not so:
+                    bars += f'<div style=display:flex;height:18px><span style=width:30px;font-size:9px>{emp}</span><div style=flex:1;height:14px;background:#eee;border-radius:2px;text-align:center;font-size:8px;color:#999;line-height:14px>休息</div></div>'
                 else:
                     p = (so.start-cov_gs)/cov_r*100; w = (so.end-so.start)/cov_r*100; c = _gc.get(sn,"#666")
                     bars += f'<div style=display:flex;height:18px><span style=width:30px;font-size:9px>{emp}</span><div style=flex:1;height:14px;background:#f0f0f0;border-radius:2px;position:relative><div style=position:absolute;left:{p:.0f}%;width:{w:.0f}%;height:100%;background:{c};border-radius:2px;text-align:center;font-size:8px;color:#fff;line-height:14px>{sn}</div></div></div>'
-            st.markdown(f'<div style=font-size:9px;color:#888>{day}</div><div>{bars}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style=font-size:9px;color:#888>{day}</div><div style=position:relative;height:14px;margin:0 0 2px 30px;font-size:0>{time_labels}</div><div>{bars}</div>', unsafe_allow_html=True)
         st.caption("A:green B:blue C:orange")
         st.markdown("### 产能拟合曲线")
         def _dc(dn):
