@@ -327,6 +327,22 @@ if st.button("🔨 生成排班方案", type="primary"):
     if not consecutive_issue:
         st.caption("✅ 无连续休息")
 
+    # ─── 员工周工时统计 ──────────────────────────────────────────
+    st.markdown("### ⏱ 员工周工时统计")
+    emp_hours: list[dict] = []
+    for emp in emp_names:
+        total_h = 0.0
+        for day in week_days:
+            sn = schedule_by_emp[emp].get(day)
+            s = shift_map.get(sn) if sn else None
+            if s:
+                total_h += s.end - s.start
+        emp_hours.append({"员工": emp, "周工时(h)": total_h, "上限(h)": 54,
+                          "状态": "✅" if total_h <= 54 else "⚠️"})
+    st.dataframe(pd.DataFrame(emp_hours).set_index("员工"), use_container_width=True,
+                 column_config={"周工时(h)": st.column_config.NumberColumn(format="%.1f"),
+                                "上限(h)": st.column_config.NumberColumn(format="%.0f")})
+
     # ─── 每日排班明细表 ───────────────────────────────────────────
     st.markdown("### 📋 每日排班明细表")
 
