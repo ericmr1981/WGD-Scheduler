@@ -251,7 +251,7 @@ if st.button("🔨 生成排班方案", type="primary"):
             shifts=shifts,
             productivity=productivity,
             demand_30min=demand_30min,
-            min_staff=effective_min_staff,
+            min_staff=1,  # 绝对底线：任何时段至少1人，更高覆盖由目标函数优化
             time_limit_seconds=10,
         )
 
