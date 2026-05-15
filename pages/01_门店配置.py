@@ -172,9 +172,10 @@ with st.expander("⚙️ 产能参数", expanded=True):
         )
     with col2:
         # 计算综合产能
-        avg_prod = int((prod_a + prod_b + prod_c + prod_other) / 4)
+        prod_vals = [v for v in [prod_a, prod_b, prod_c, prod_other] if v > 0]
+        avg_prod = int(sum(prod_vals) / len(prod_vals)) if prod_vals else 1
         st.metric("综合单人产能（自动计算）", f"{avg_prod} 单/h",
-                  help="四种出品类型的算术平均")
+                  help="仅计入 >0 的出品类型")
 
 with st.expander("📈 高峰时段", expanded=False):
     st.markdown("**工作日高峰**")
@@ -239,7 +240,7 @@ if st.button("💾 保存配置", type="primary"):
         "close_time": f"{int(close_h):02d}:{int(close_h % 1 * 60):02d}",
         "employee_count": employee_count,
         "service_type": service_type,
-        "productivity_per_hour": int((prod_a + prod_b + prod_c + prod_other) / 4),
+        "productivity_per_hour": int(sum(prod_vals) / len(prod_vals)) if prod_vals else 1,
         "productivity_a": prod_a,
         "productivity_b": prod_b,
         "productivity_c": prod_c,
@@ -283,7 +284,7 @@ if st.button("💾 保存配置", type="primary"):
             "name": store_name,
             "hours": (open_h, close_h),
             "employees": employee_count,
-            "productivity": int((prod_a + prod_b + prod_c + prod_other) / 4),
+            "productivity": int(sum(prod_vals) / len(prod_vals)) if prod_vals else 1,
             "productivity_a": prod_a,
             "productivity_b": prod_b,
             "productivity_c": prod_c,
