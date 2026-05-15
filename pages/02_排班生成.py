@@ -86,11 +86,14 @@ with st.expander("📥 本周客流预估", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
         base_customers = st.number_input(
-            "日均客流量（基准）", min_value=10, value=200,
+            "日均客流量（基准）", min_value=10,
+            value=st.session_state.get("sv_base", 200), key="sv_base",
             help="输入后下方自动生成30分钟颗粒度客流分布图"
         )
         default_peak = config["peak_customers"] if config else 60
-        peak_input = st.number_input("本周高峰每小时客流量", min_value=1, value=default_peak)
+        peak_input = st.number_input("本周高峰每小时客流量", min_value=1,
+                                      value=st.session_state.get("sv_peak", default_peak),
+                                      key="sv_peak")
     with col2:
         employees = config["employees"] if config else 3
         productivity = config["productivity"] if config else 18
@@ -179,25 +182,22 @@ if st.button("🔨 生成排班方案", type="primary"):
     if staff_shortage:
         st.error(f"⚠️ **人力不足！** 高峰需要 {effective_min_staff} 人，但只有 {employees} 人可用。缺 {effective_min_staff - employees} 人。建议：降低高峰客流预估、提高单人产能参数，或增加员工。")
 
-    st.markdown("---")
-    st.subheader("📊 排班分析结果")
+    with st.expander("📊 排班方案总览", expanded=True):
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("高峰需求人数", f"{min_staff} 人",
+                      help="由产能公式算出：⌈高峰客流÷单人产能⌉")
+        with col2:
+            st.metric("最低在岗底线", f"{min_on_duty} 人",
+                      help="门店配置中设定的安全底线")
+        with col3:
+            st.metric("实际执行最低人数", f"{effective_min_staff} 人",
+                      help="取「高峰需求」和「最低在岗底线」的较大值")
+        with col4:
+            st.metric("可用员工数", f"{employees} 人")
 
-    # ─── 核心指标 ──────────────────────────────────────────────────
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("高峰需求人数", f"{min_staff} 人",
-                  help="由产能公式算出：⌈高峰客流÷单人产能⌉")
-    with col2:
-        st.metric("最低在岗底线", f"{min_on_duty} 人",
-                  help="门店配置中设定的安全底线")
-    with col3:
-        st.metric("实际执行最低人数", f"{effective_min_staff} 人",
-                  help="取「高峰需求」和「最低在岗底线」的较大值")
-    with col4:
-        st.metric("可用员工数", f"{employees} 人")
-
-    # ─── 工时分析 ──────────────────────────────────────────────────
-    st.markdown("### ⏱ 工时分析")
+        # ─── 工时分析 ──────────────────────────────────────────────────
+        st.markdown("### ⏱ 工时分析")
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("每班目标工时", f"{target_hours}h",
