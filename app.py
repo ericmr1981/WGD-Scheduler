@@ -6,6 +6,44 @@ Streamlit + Supabase
 
 import streamlit as st
 
+from db.supabase_client import get_stores
+
+
+def _parse_hour(time_val, default):
+    if isinstance(time_val, str) and ":" in time_val:
+        parts = time_val.split(":")
+        return int(parts[0]) + int(parts[1]) / 60
+    return default
+
+
+def _build_config(store: dict) -> dict:
+    return {
+        "id": store["id"],
+        "name": store["name"],
+        "hours": (_parse_hour(store["open_time"], 10), _parse_hour(store["close_time"], 22)),
+        "employees": store["employee_count"],
+        "productivity": store["productivity_per_hour"],
+        "productivity_a": store.get("productivity_a", 24),
+        "productivity_b": store.get("productivity_b", 18),
+        "productivity_c": store.get("productivity_c", 12),
+        "productivity_other": store.get("productivity_other", 15),
+        "peak_customers": store.get("peak_customers_per_hour", 60),
+        "service_type": store.get("service_type", "纯堂食"),
+        "peak_periods": {
+            "weekday_lunch": store.get("weekday_lunch_peak", "12:00-14:00"),
+            "weekday_dinner": store.get("weekday_dinner_peak", "17:00-19:00"),
+            "weekend_lunch": store.get("weekend_lunch_peak", "11:00-14:00"),
+            "weekend_dinner": store.get("weekend_dinner_peak", "16:00-20:00"),
+        },
+        "opening_prep_mins": store.get("opening_prep_mins", 60),
+        "closing_tasks_mins": store.get("closing_tasks_mins", 60),
+        "meal_break_mins": store.get("meal_break_mins", 30),
+        "max_meals_per_employee": store.get("max_meals_per_employee", 1),
+        "target_hours_per_employee": float(store.get("target_hours_per_employee", 8.0)),
+        "min_staff_on_duty": store.get("min_staff_on_duty", 1),
+    }
+
+
 st.set_page_config(
     page_title="WGD-Scheduler",
     page_icon="🍦",
@@ -29,7 +67,6 @@ st.markdown("""
 | 1️⃣ | **门店配置** | 营业时间、员工数、出品类型产能(A/B/C/其他)、高峰时段、开早/打烊/用餐参数、班次时长、最低在岗人数 |
 | 2️⃣ | **排班生成** | 输入日均客流，CP-SAT 求解器自动生成 **3 个最优排班方案**，含产能拟合曲线、甘特图、周工时统计 |
 | 3️⃣ | **排班检查** | 检查每日覆盖、产能合规 |
-| 4️⃣ | **复盘迭代** | 每周复盘，修正产能参数 |
 | 📚 | **知识库** | 排班方法论总纲、操作手册、表格模板 |
 
 ### 核心特性
@@ -61,8 +98,26 @@ st.markdown("""
 
 # 侧边栏信息
 with st.sidebar:
+    st.markdown("### 🏪 门店选择")
+    stores = []
+    try:
+        stores = get_stores()
+    except Exception:
+        pass
+    store_names = [s["name"] for s in stores]
+    current_store = st.session_state.get("selected_store_name", store_names[0] if store_names else None)
+    if store_names:
+        idx = store_names.index(current_store) if current_store in store_names else 0
+        selected = st.selectbox("选择门店", store_names, index=idx, key="store_selector", label_visibility="collapsed")
+        if selected != st.session_state.get("selected_store_name"):
+            st.session_state["selected_store_name"] = selected
+            store = next(s for s in stores if s["name"] == selected)
+            st.session_state["store_config"] = _build_config(store)
+            st.session_state["store_id"] = store["id"]
+            st.rerun()
+
     st.markdown("### 关于 WGD-Scheduler")
-    st.markdown("版本：v1.0 | 排班优化引擎")
+    st.markdown("版本：v1.1 | 排班优化引擎")
     st.markdown("---")
     st.markdown("**核心技术栈**")
     st.markdown("- **前端**：Streamlit + ECharts")
