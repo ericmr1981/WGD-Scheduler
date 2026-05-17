@@ -39,6 +39,12 @@ def get_time_slot(order_time: Union[str, datetime]) -> str:
 
 def _parse_datetime(s: str):
     """Try common datetime string formats. Returns datetime or None."""
+    import re as _re
+
+    # Strip timezone offset like "+00", "+08:00", "-05:00"
+    # so "2026-03-01 12:14:25+00" becomes "2026-03-01 12:14:25"
+    s = _re.sub(r"[+-]\d{2}(:\d{2})?$", "", s.strip())
+
     for fmt in (
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%d %H:%M:%S",
