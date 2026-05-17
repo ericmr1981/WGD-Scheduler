@@ -90,40 +90,58 @@ traffic_source = st.radio(
 )
 
 if traffic_source == "actual":
-    from scheduler.traffic_analyzer import get_actual_traffic
+    from scheduler.traffic_analyzer import group_by_slots, average_by_weekday_type, build_demand_30min
+    from db.supabase_client import get_product_sales
+    from datetime import datetime as _dt
 
     with st.spinner("正在从数据库加载实际客流数据..."):
         open_hour = 10.0
         close_hour = 22.0
-        actual_demand = get_actual_traffic(
-            config["name"],
-            week_days=["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
-            open_hour=int(open_hour),
-            close_hour=int(close_hour),
-        )
+        week_days_all = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        all_rows = get_product_sales(config["name"])
 
-    if actual_demand:
-        # 计算实际客流统计
-        wd_vals_all = []
-        we_vals_all = []
-        for day in ["周一", "周二", "周三", "周四", "周五"]:
-            if day in actual_demand:
-                wd_vals_all.extend(actual_demand[day].values())
+    if all_rows:
+        # ── 上月数据 → 客流分布（默认使用） ──
+        today = _dt.now()
+        last_m = (today.month - 1) or 12
+        last_y = today.year - 1 if last_m == 12 else today.year
+        lm_rows = [r for r in all_rows
+                   if r["order_time"].startswith(f"{last_y}-{last_m:02d}")]
+
+        # 如果上月无数据则回退到全部数据
+        source_rows = lm_rows if lm_rows else all_rows
+        wd_all = ["周一", "周二", "周三", "周四", "周五"]
+        lm_grouped = group_by_slots(source_rows)
+        lm_avg = average_by_weekday_type(lm_grouped)
+        lm_demand = build_demand_30min(lm_avg, week_days_all, int(open_hour), int(close_hour))
+
+        # ── 全部数据 → 历史最高峰值 ──
+        all_grouped = group_by_slots(all_rows)
+        all_avg = average_by_weekday_type(all_grouped)
+        all_peak_vals = []
+        for day in wd_all:
+            all_peak_vals.extend(all_avg.get("weekday", {}).values())
+        all_peak_vals.extend(all_avg.get("weekend", {}).values())
+        hist_max_30min = max(all_peak_vals) if all_peak_vals else 0
+        peak_hourly = round(hist_max_30min * 2 * 1.5)
+
+        # 日均客流（用默认的月度数据）
+        wd_slots = []
+        we_slots = []
+        for day in wd_all:
+            if day in lm_demand:
+                wd_slots.extend(lm_demand[day].values())
         for day in ["周六", "周日"]:
-            if day in actual_demand:
-                we_vals_all.extend(actual_demand[day].values())
-
-        wd_daily = sum(wd_vals_all) if wd_vals_all else 0
-        we_daily = sum(we_vals_all) if we_vals_all else 0
-        avg_daily = round((wd_daily * 5 + we_daily * 2) / 7)
-        peak_30min = max(list(wd_vals_all) + list(we_vals_all)) if (wd_vals_all or we_vals_all) else 0
-        peak_hourly = round(peak_30min * 2 * 1.5)  # 真实峰值 × 1.5 安全系数
+            if day in lm_demand:
+                we_slots.extend(lm_demand[day].values())
+        avg_daily = round((sum(wd_slots) + sum(we_slots)) / 7) if (wd_slots or we_slots) else 0
 
         st.success("✅ 已加载实际客流数据")
-        st.caption(f"数据范围：2026-03-01 ~ 2026-04-30 | 日均{avg_daily}单 | 高峰{peak_hourly}单/h")
-        st.session_state["actual_demand_30min"] = actual_demand
+        date_range = f"{source_rows[0]['order_time'][:10]}" if source_rows else ""
+        date_range += f" ~ {source_rows[-1]['order_time'][:10]}" if len(source_rows) > 1 else ""
+        st.caption(f"数据范围：{date_range} | 日均{avg_daily}单 | 历史峰值{peak_hourly}单/h")
+        st.session_state["actual_demand_30min"] = lm_demand
         st.session_state["actual_stats"] = {"avg_daily": avg_daily, "peak_hourly": peak_hourly}
-        # 同步到输入控件，确保后续计算使用实际值而非残留的预估值
         st.session_state["sv_base"] = avg_daily
         st.session_state["sv_peak"] = peak_hourly
     else:
