@@ -103,32 +103,51 @@ if traffic_source == "actual":
         )
 
     if actual_demand:
-        sample_day = "周三"
-        if sample_day in actual_demand:
-            vals = [v for v in actual_demand[sample_day].values() if v > 0]
-            max_val = max(vals) if vals else 0
-        else:
-            max_val = 0
+        # 计算实际客流统计
+        wd_vals_all = []
+        we_vals_all = []
+        for day in ["周一", "周二", "周三", "周四", "周五"]:
+            if day in actual_demand:
+                wd_vals_all.extend(actual_demand[day].values())
+        for day in ["周六", "周日"]:
+            if day in actual_demand:
+                we_vals_all.extend(actual_demand[day].values())
+
+        wd_daily = sum(wd_vals_all) if wd_vals_all else 0
+        we_daily = sum(we_vals_all) if we_vals_all else 0
+        avg_daily = round((wd_daily * 5 + we_daily * 2) / 7)
+        peak_30min = max(list(wd_vals_all) + list(we_vals_all)) if (wd_vals_all or we_vals_all) else 0
+        peak_hourly = peak_30min * 2
+
         st.success("✅ 已加载实际客流数据")
-        st.caption(f"数据范围：2026-03-01 ~ 2026-04-30 | 平日峰值：{max_val} 单/30min")
+        st.caption(f"数据范围：2026-03-01 ~ 2026-04-30 | 日均{avg_daily}单 | 高峰{peak_hourly}单/h")
         st.session_state["actual_demand_30min"] = actual_demand
+        st.session_state["actual_stats"] = {"avg_daily": avg_daily, "peak_hourly": peak_hourly}
     else:
         st.warning("⚠️ 未找到该门店的实际销售数据，将使用预估客流")
         traffic_source = "estimated"
 
 # ─── 参数输入 ─────────────────────────────────────────────────────
 
-with st.expander("📥 本周客流预估", expanded=traffic_source != "actual"):
+if traffic_source == "actual" and st.session_state.get("actual_stats"):
+    stats = st.session_state["actual_stats"]
+    st.info(f"📊 日均实际客流：**{stats['avg_daily']}** 单/天 | 实际高峰：**{stats['peak_hourly']}** 单/h")
+    base_customers = stats["avg_daily"]
+    peak_input = stats["peak_hourly"]
+else:
+    base_customers = st.session_state.get("sv_base", 200)
+    peak_input = st.session_state.get("sv_peak", config["peak_customers"] if config else 60)
+
+with st.expander("📥 本周客流", expanded=traffic_source != "actual"):
     col1, col2 = st.columns(2)
     with col1:
         base_customers = st.number_input(
-            "日均客流量（基准）", min_value=10,
-            value=st.session_state.get("sv_base", 200), key="sv_base",
-            help="输入后下方自动生成30分钟颗粒度客流分布图"
+            "日均客流量（基准）", min_value=1,
+            value=int(base_customers), key="sv_base",
         )
         default_peak = config["peak_customers"] if config else 60
         peak_input = st.number_input("本周高峰每小时客流量", min_value=1,
-                                      value=st.session_state.get("sv_peak", default_peak),
+                                      value=int(peak_input),
                                       key="sv_peak")
     with col2:
         employees = config["employees"] if config else 3
@@ -173,12 +192,14 @@ st_echarts(options={
         "axisLabel": {"rotate": 45, "fontSize": 10},
     },
     "yAxis": {"type": "value", "name": "客流量",
-              "max": max(max(wd_vals), max(we_vals)) * 1.5},
+              "max": max(max(wd_vals), max(we_vals)) * 1.8 if max(max(wd_vals), max(we_vals)) > 0 else 10},
     "series": [
         {"name": "平日客流", "type": "bar", "data": wd_vals,
-         "itemStyle": {"color": "#1f77b4"}},
+         "itemStyle": {"color": "#1f77b4"},
+         "label": {"show": True, "position": "top", "fontSize": 9, "color": "#333"}},
         {"name": "周末客流", "type": "bar", "data": we_vals,
-         "itemStyle": {"color": "#ff7f0e"}},
+         "itemStyle": {"color": "#ff7f0e"},
+         "label": {"show": True, "position": "top", "fontSize": 9, "color": "#333"}},
     ],
 }, height="350px")
 st.caption(f"📊 {chart_label}")
