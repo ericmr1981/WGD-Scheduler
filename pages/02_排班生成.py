@@ -80,9 +80,45 @@ if config:
 else:
     st.warning("⚠️ 尚未配置门店信息，请先在「门店配置」页面填写并保存。")
 
+# ─── 客流来源选择 ────────────────────────────────────────────────
+traffic_source = st.radio(
+    "📊 客流来源",
+    options=["estimated", "actual"],
+    format_func=lambda x: {"estimated": "使用预估客流（基于高峰参数计算）", "actual": "使用实际客流（从销售数据导入）"}[x],
+    horizontal=True,
+    key="traffic_source",
+)
+
+if traffic_source == "actual":
+    from scheduler.traffic_analyzer import get_actual_traffic
+
+    with st.spinner("正在从数据库加载实际客流数据..."):
+        open_hour = 10.0
+        close_hour = 22.0
+        actual_demand = get_actual_traffic(
+            config["name"],
+            week_days=["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
+            open_hour=int(open_hour),
+            close_hour=int(close_hour),
+        )
+
+    if actual_demand:
+        sample_day = "周三"
+        if sample_day in actual_demand:
+            vals = [v for v in actual_demand[sample_day].values() if v > 0]
+            max_val = max(vals) if vals else 0
+        else:
+            max_val = 0
+        st.success("✅ 已加载实际客流数据")
+        st.caption(f"数据范围：2026-03-01 ~ 2026-04-30 | 平日峰值：{max_val} 单/30min")
+        st.session_state["actual_demand_30min"] = actual_demand
+    else:
+        st.warning("⚠️ 未找到该门店的实际销售数据，将使用预估客流")
+        traffic_source = "estimated"
+
 # ─── 参数输入 ─────────────────────────────────────────────────────
 
-with st.expander("📥 本周客流预估", expanded=True):
+with st.expander("📥 本周客流预估", expanded=traffic_source != "actual"):
     col1, col2 = st.columns(2)
     with col1:
         base_customers = st.number_input(
@@ -212,12 +248,15 @@ if st.button("🔨 生成排班方案", type="primary"):
     emp_names = [f"员工{i+1}" for i in range(employees)]
 
     # ── 构建 30 分钟客流需求 ─────────────────────────────────────
-    demand_30min: dict[str, dict[str, int]] = {}
-    for day in week_days:
-        dist = estimate_half_hourly_customers(
-            base_customers, day_name=day, peak_periods=peak_periods,
-        )
-        demand_30min[day] = {d["time"]: d["customers"] for d in dist}
+    if traffic_source == "actual" and st.session_state.get("actual_demand_30min"):
+        demand_30min = st.session_state["actual_demand_30min"]
+    else:
+        demand_30min: dict[str, dict[str, int]] = {}
+        for day in week_days:
+            dist = estimate_half_hourly_customers(
+                base_customers, day_name=day, peak_periods=peak_periods,
+            )
+            demand_30min[day] = {d["time"]: d["customers"] for d in dist}
 
     _ALL_SOLUTIONS: list = []
     # ── 使用 CP-SAT 求解器 ───────────────────────────────────────
