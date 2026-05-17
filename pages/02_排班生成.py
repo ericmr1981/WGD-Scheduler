@@ -134,24 +134,33 @@ with st.expander("📥 本周客流预估", expanded=traffic_source != "actual")
         employees = config["employees"] if config else 3
         productivity = config["productivity"] if config else 18
 
-# ─── 30分钟颗粒度客流分布图（自动生成）──────────────────────────
+# ─── 30分钟颗粒度客流分布图 ───────────────────────────────────
 
 st.markdown("### 📊 日客流分布图（30分钟颗粒度）")
 
-peak_periods = config.get("peak_periods") if config else None
-
-weekday_dist = estimate_half_hourly_customers(
-    base_customers, day_name="周三", peak_periods=peak_periods
-)
-weekend_dist = estimate_half_hourly_customers(
-    base_customers, day_name="周六", peak_periods=peak_periods,
-)
-
 from streamlit_echarts import st_echarts
 
-times = [d["time"] for d in weekday_dist]
-wd_vals = [d["customers"] for d in weekday_dist]
-we_vals = [d["customers"] for d in weekend_dist]
+if traffic_source == "actual" and st.session_state.get("actual_demand_30min"):
+    actual_demand = st.session_state["actual_demand_30min"]
+    wd_data = actual_demand.get("周三", {})
+    we_data = actual_demand.get("周六", {})
+    all_slots = sorted(set(list(wd_data.keys()) + list(we_data.keys())))
+    times = all_slots
+    wd_vals = [wd_data.get(s, 0) for s in all_slots]
+    we_vals = [we_data.get(s, 0) for s in all_slots]
+    chart_label = "实际客流（周三 vs 周六）"
+else:
+    peak_periods = config.get("peak_periods") if config else None
+    weekday_dist = estimate_half_hourly_customers(
+        base_customers, day_name="周三", peak_periods=peak_periods
+    )
+    weekend_dist = estimate_half_hourly_customers(
+        base_customers, day_name="周六", peak_periods=peak_periods,
+    )
+    times = [d["time"] for d in weekday_dist]
+    wd_vals = [d["customers"] for d in weekday_dist]
+    we_vals = [d["customers"] for d in weekend_dist]
+    chart_label = "预估客流（周三 vs 周六）"
 
 st_echarts(options={
     "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
@@ -171,7 +180,7 @@ st_echarts(options={
          "itemStyle": {"color": "#ff7f0e"}},
     ],
 }, height="350px")
-st.caption("📊 平日（周三）vs 周末（周六）客流对比")
+st.caption(f"📊 {chart_label}")
 
 if peak_periods:
     cols = st.columns(2)

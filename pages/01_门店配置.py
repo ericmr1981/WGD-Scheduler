@@ -62,8 +62,7 @@ with col2:
         st.cache_data.clear()
         st.rerun()
 
-# ─── 门店管理列表 ────────────────────────────────────────────────
-st.markdown("### 🏪 门店列表")
+# ─── 门店选择 ────────────────────────────────────────────────────
 
 stores = []
 try:
@@ -71,79 +70,46 @@ try:
 except Exception:
     pass
 
-# 当前选中的门店
-selected_store_id = st.session_state.get("store_id")
-
 if stores:
-    for s in stores:
-        is_current = s["id"] == selected_store_id
-        c1, c2, c3 = st.columns([3, 1, 1])
-        with c1:
-            st.markdown(f"{'✅ ' if is_current else ''}**{s['name']}**")
-        with c2:
-            if not is_current:
-                if st.button("切换", key=f"switch_{s['id']}"):
-                    # Build full config dict and set session state
-                    st.session_state["store_id"] = s["id"]
-                    st.session_state["selected_store_name"] = s["name"]
-                    config = {
-                        "id": s["id"],
-                        "name": s["name"],
-                        "hours": (
-                            int(str(s.get("open_time", "10:00")).split(":")[0]) + int(str(s.get("open_time", "10:00")).split(":")[1])/60,
-                            int(str(s.get("close_time", "22:00")).split(":")[0]) + int(str(s.get("close_time", "22:00")).split(":")[1])/60,
-                        ),
-                        "employees": s["employee_count"],
-                        "productivity": s["productivity_per_hour"],
-                        "productivity_a": s.get("productivity_a", 24),
-                        "productivity_b": s.get("productivity_b", 18),
-                        "productivity_c": s.get("productivity_c", 12),
-                        "productivity_other": s.get("productivity_other", 15),
-                        "peak_customers": s.get("peak_customers_per_hour", 60),
-                        "service_type": s.get("service_type", "纯堂食"),
-                        "peak_periods": {
-                            "weekday_lunch": s.get("weekday_lunch_peak", "12:00-14:00"),
-                            "weekday_dinner": s.get("weekday_dinner_peak", "17:00-19:00"),
-                            "weekend_lunch": s.get("weekend_lunch_peak", "11:00-14:00"),
-                            "weekend_dinner": s.get("weekend_dinner_peak", "16:00-20:00"),
-                        },
-                        "opening_prep_mins": s.get("opening_prep_mins", 60),
-                        "closing_tasks_mins": s.get("closing_tasks_mins", 60),
-                        "meal_break_mins": s.get("meal_break_mins", 30),
-                        "max_meals_per_employee": s.get("max_meals_per_employee", 1),
-                        "target_hours_per_employee": float(s.get("target_hours_per_employee", 8.0)),
-                        "min_staff_on_duty": s.get("min_staff_on_duty", 1),
-                    }
-                    st.session_state["store_config"] = config
-                    st.rerun()
-        with c3:
-            if st.button("🗑️", key=f"del_{s['id']}"):
-                try:
-                    delete_store(s["id"])
-                    if s["id"] == st.session_state.get("store_id"):
-                        st.session_state.pop("store_id", None)
-                        st.session_state.pop("store_config", None)
-                        st.session_state.pop("selected_store_name", None)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"删除失败: {e}")
-else:
-    st.info("暂无门店，请在下方创建")
+    store_map = {s["name"]: s for s in stores}
+    current_name = st.session_state.get("selected_store_name", stores[0]["name"])
+    if current_name not in store_map:
+        current_name = stores[0]["name"]
+    idx = list(store_map.keys()).index(current_name)
+    selected_name = st.selectbox("选择门店", list(store_map.keys()), index=idx)
 
-# 新建门店
-with st.expander("➕ 新建门店"):
-    new_name = st.text_input("门店名称", key="new_store_name_input")
-    if st.button("创建门店"):
-        if new_name.strip():
-            created = create_store({"name": new_name.strip()})
-            if created:
-                st.success(f"门店「{new_name}」已创建")
-                # Auto-switch to new store
-                st.session_state["store_id"] = created["id"]
-                st.session_state["selected_store_name"] = created["name"]
-                st.rerun()
-            else:
-                st.error("创建失败")
+    if selected_name != current_name:
+        s = store_map[selected_name]
+        st.session_state["store_id"] = s["id"]
+        st.session_state["selected_store_name"] = selected_name
+        st.session_state["store_config"] = {
+            "id": s["id"], "name": s["name"],
+            "hours": (
+                int(str(s.get("open_time", "10:00")).split(":")[0]) + int(str(s.get("open_time", "10:00")).split(":")[1])/60,
+                int(str(s.get("close_time", "22:00")).split(":")[0]) + int(str(s.get("close_time", "22:00")).split(":")[1])/60,
+            ),
+            "employees": s["employee_count"],
+            "productivity": s["productivity_per_hour"],
+            "productivity_a": s.get("productivity_a", 24),
+            "productivity_b": s.get("productivity_b", 18),
+            "productivity_c": s.get("productivity_c", 12),
+            "productivity_other": s.get("productivity_other", 15),
+            "peak_customers": s.get("peak_customers_per_hour", 60),
+            "service_type": s.get("service_type", "纯堂食"),
+            "peak_periods": {
+                "weekday_lunch": s.get("weekday_lunch_peak", "12:00-14:00"),
+                "weekday_dinner": s.get("weekday_dinner_peak", "17:00-19:00"),
+                "weekend_lunch": s.get("weekend_lunch_peak", "11:00-14:00"),
+                "weekend_dinner": s.get("weekend_dinner_peak", "16:00-20:00"),
+            },
+            "opening_prep_mins": s.get("opening_prep_mins", 60),
+            "closing_tasks_mins": s.get("closing_tasks_mins", 60),
+            "meal_break_mins": s.get("meal_break_mins", 30),
+            "max_meals_per_employee": s.get("max_meals_per_employee", 1),
+            "target_hours_per_employee": float(s.get("target_hours_per_employee", 8.0)),
+            "min_staff_on_duty": s.get("min_staff_on_duty", 1),
+        }
+        st.rerun()
 
 st.markdown("---")
 
