@@ -117,7 +117,7 @@ if traffic_source == "actual":
         we_daily = sum(we_vals_all) if we_vals_all else 0
         avg_daily = round((wd_daily * 5 + we_daily * 2) / 7)
         peak_30min = max(list(wd_vals_all) + list(we_vals_all)) if (wd_vals_all or we_vals_all) else 0
-        peak_hourly = peak_30min * 2
+        peak_hourly = round(peak_30min * 2 * 1.5)  # 真实峰值 × 1.5 安全系数
 
         st.success("✅ 已加载实际客流数据")
         st.caption(f"数据范围：2026-03-01 ~ 2026-04-30 | 日均{avg_daily}单 | 高峰{peak_hourly}单/h")
