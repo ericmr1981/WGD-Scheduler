@@ -140,6 +140,8 @@ st.markdown("### 📊 日客流分布图（30分钟颗粒度）")
 
 from streamlit_echarts import st_echarts
 
+peak_periods = config.get("peak_periods") if config else None
+
 if traffic_source == "actual" and st.session_state.get("actual_demand_30min"):
     actual_demand = st.session_state["actual_demand_30min"]
     wd_data = actual_demand.get("周三", {})
@@ -150,7 +152,6 @@ if traffic_source == "actual" and st.session_state.get("actual_demand_30min"):
     we_vals = [we_data.get(s, 0) for s in all_slots]
     chart_label = "实际客流（周三 vs 周六）"
 else:
-    peak_periods = config.get("peak_periods") if config else None
     weekday_dist = estimate_half_hourly_customers(
         base_customers, day_name="周三", peak_periods=peak_periods
     )
