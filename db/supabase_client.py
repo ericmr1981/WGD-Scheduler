@@ -86,6 +86,20 @@ def _http_patch(path: str, data: dict) -> list:
         return []
 
 
+def _http_delete(path: str) -> bool:
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
+        return False
+    url = f"{_SUPABASE_URL.rstrip('/')}/rest/v1/{path.lstrip('/')}"
+    req = Request(url, method="DELETE", headers={
+        "apikey": _SUPABASE_KEY, "Authorization": f"Bearer {_SUPABASE_KEY}",
+    })
+    try:
+        with urlopen(req, timeout=10) as resp:
+            return resp.status == 204 or resp.status == 200
+    except Exception:
+        return False
+
+
 # ─── SDK 客户端（可选）─────────────────────────────────────────
 
 _client: Optional[object] = None
@@ -257,3 +271,32 @@ def save_review(review_data: dict) -> dict:
             pass
     result = _http_post("weekly_reviews", review_data)
     return result[0] if result else {}
+
+
+def get_product_sales(store_name: str) -> list:
+    client = get_client()
+    if client is not None:
+        try:
+            return (
+                client.table("product_sales")
+                .select("*")
+                .eq("store_name", store_name)
+                .order("order_time", desc=False)
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            pass
+    return _http_get(f"product_sales?store_name=eq.{store_name}&order=order_time.asc")
+
+
+def delete_store(store_id: str) -> bool:
+    client = get_client()
+    if client is not None:
+        try:
+            client.table("stores").delete().eq("id", store_id).execute()
+            return True
+        except Exception:
+            pass
+    return _http_delete(f"stores?id=eq.{store_id}")
