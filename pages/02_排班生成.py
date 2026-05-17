@@ -123,6 +123,9 @@ if traffic_source == "actual":
         st.caption(f"数据范围：2026-03-01 ~ 2026-04-30 | 日均{avg_daily}单 | 高峰{peak_hourly}单/h")
         st.session_state["actual_demand_30min"] = actual_demand
         st.session_state["actual_stats"] = {"avg_daily": avg_daily, "peak_hourly": peak_hourly}
+        # 同步到输入控件，确保后续计算使用实际值而非残留的预估值
+        st.session_state["sv_base"] = avg_daily
+        st.session_state["sv_peak"] = peak_hourly
     else:
         st.warning("⚠️ 未找到该门店的实际销售数据，将使用预估客流")
         traffic_source = "estimated"
