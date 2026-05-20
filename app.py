@@ -51,6 +51,61 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ========== SSO 认证 ==========
+import json, ssl, urllib.request
+
+_sso_url, _sso_key = None, None
+_sso_ctx = ssl.create_default_context()
+_sso_ctx.check_hostname = False
+_sso_ctx.verify_mode = ssl.CERT_NONE
+
+try:
+    _sso_url = (
+        st.secrets.get("SUPABASE_URL", "")
+        or st.secrets.get("supabase", {}).get("url", "")
+    )
+    _sso_key = (
+        st.secrets.get("SUPABASE_ANON_KEY", "")
+        or st.secrets.get("supabase", {}).get("anon_key", "")
+        or st.secrets.get("SUPABASE_KEY", "")
+    )
+except Exception:
+    pass
+
+if "sso_user" not in st.session_state:
+    params = st.query_params
+    token = params.get("sso_token")
+    if isinstance(token, list):
+        token = token[0] if token else None
+    token = str(token) if token else None
+
+    if token and _sso_url and _sso_key:
+        body = json.dumps({"p_token": token}).encode()
+        req = urllib.request.Request(
+            f"{_sso_url}/rest/v1/rpc/verify_sso_token",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "apikey": _sso_key,
+                "Authorization": f"Bearer {_sso_key}",
+            },
+        )
+        try:
+            resp = urllib.request.urlopen(req, context=_sso_ctx)
+            result = json.loads(resp.read().decode())
+            if result.get("valid"):
+                st.session_state.sso_user = result
+                st.rerun()
+        except Exception:
+            pass
+
+    if "sso_user" not in st.session_state or not st.session_state.sso_user:
+        st.error("# 未授权访问\n\n请通过公司 Portal 登录后访问。")
+        st.stop()
+
+_sso_url, _sso_key = None, None
+# ========== SSO 认证结束 ==========
+
 st.title("🍦 WGD-Scheduler")
 st.markdown("---")
 
