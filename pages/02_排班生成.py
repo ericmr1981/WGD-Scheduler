@@ -234,6 +234,96 @@ if peak_periods:
 
 st.markdown("---")
 
+
+def _render_schedule(sch, sol, label, expanded, emp_names, week_days, shifts, demand_30min, productivity, peak_input, shift_map):
+    st.markdown(f"**{label}**")
+    if sol: st.caption(f"得分: {sol.get('objective','?')} | 缺口: {sol.get('gap_total','?')} | 班次种类: {sol.get('shift_types_used','?')}")
+    rest_local = {emp: [d for d in week_days if sch[emp].get(d) is None] for emp in emp_names}
+    st.markdown("### 休息日安排（每人每周1天）")
+    for emp, days in rest_local.items(): st.markdown(f"- **{emp}**：休息 {'、'.join(days)}")
+    ci = False
+    for emp in emp_names:
+        for d in rest_local.get(emp, []):
+            i = week_days.index(d)
+            if (i>0 and week_days[i-1] in rest_local.get(emp,[])) or (i<len(week_days)-1 and week_days[i+1] in rest_local.get(emp,[])):
+                st.warning(f"连续休息 {emp}"); ci = True
+    if not ci: st.caption("无连续休息")
+    st.markdown("### 员工周工时统计")
+    eh = []
+    for emp in emp_names:
+        th = sum(s.end-s.start for d in week_days for sn in [sch[emp].get(d)] if sn for s in [shift_map.get(sn)] if s)
+        eh.append({"员工":emp, "周工时(h)":round(th,1), "上限":54, "状态":"OK" if th<=54 else "NG"})
+    st.dataframe(pd.DataFrame(eh).set_index("员工"), use_container_width=True)
+    st.markdown("### 每日排班明细表")
+    td = {}
+    for day in week_days:
+        td[day] = []
+        for emp in emp_names:
+            sn = sch[emp].get(day); s = shift_map.get(sn) if sn else None
+            td[day].append(f"{sn}班({_fmt(s.start)}-{_fmt(s.end)})" if s else "休息")
+    st.dataframe(pd.DataFrame(td, index=emp_names), use_container_width=True)
+    cov_gs = int(min(s.start for s in shifts)); cov_ge = int(max(s.end for s in shifts)); cov_r = cov_ge - cov_gs
+    st.markdown("#### 📅 每日班次甘特图")
+    _gc = {"A":"#4caf50","B":"#2196f3","C":"#ff9800"}
+    for day in week_days:
+        # 时间轴标尺
+        time_labels = ""
+        for h in range(cov_gs, cov_ge + 1):
+            p = (h - cov_gs) / cov_r * 100
+            time_labels += f'<span style="position:absolute;left:{p:.0f}%;font-size:8px;color:#888">{h}:00</span>'
+        bars = ""
+        for emp in emp_names:
+            sn = sch[emp].get(day); so = shift_map.get(sn) if sn else None
+            if not so:
+                bars += f'<div style=display:flex;height:18px><span style=width:30px;font-size:9px>{emp}</span><div style=flex:1;height:14px;background:#eee;border-radius:2px;text-align:center;font-size:8px;color:#999;line-height:14px>休息</div></div>'
+            else:
+                p = (so.start-cov_gs)/cov_r*100; w = (so.end-so.start)/cov_r*100; c = _gc.get(sn,"#666")
+                bars += f'<div style=display:flex;height:18px><span style=width:30px;font-size:9px>{emp}</span><div style=flex:1;height:14px;background:#f0f0f0;border-radius:2px;position:relative><div style=position:absolute;left:{p:.0f}%;width:{w:.0f}%;height:100%;background:{c};border-radius:2px;text-align:center;font-size:8px;color:#fff;line-height:14px>{sn}</div></div></div>'
+        st.markdown(f'<div style=font-size:9px;color:#888>{day}</div><div style=position:relative;height:14px;margin:0 0 2px 30px;font-size:0>{time_labels}</div><div>{bars}</div>', unsafe_allow_html=True)
+    st.caption("A:green B:blue C:orange")
+    st.markdown("### 产能拟合曲线")
+    def _dc(dn):
+        slots = sorted(demand_30min.get(dn,{}).keys())
+        sc = {s.name:{t for t in slots if s.start<=int(t.split(":")[0])+int(t.split(":")[1])/60<s.end} for s in shifts}
+        rows = []
+        for t in slots:
+            staff = sum(1 for emp in emp_names if sch[emp].get(dn) and t in sc.get(sch[emp][dn],set()))
+            rows.append({"time":t,"需求":demand_30min.get(dn,{}).get(t,0),"产量":int(staff*productivity/2)})
+        return pd.DataFrame(rows).set_index("time")
+    ca, cb = st.columns(2)
+    with ca:
+        df = _dc("周三")
+        if not df.empty:
+            pv = int(peak_input/2)
+            o = {"tooltip":{"trigger":"axis"},"legend":{"data":["需求","产量","峰值"],"top":0},"grid":{"left":40,"right":5,"top":25,"bottom":25},"xAxis":{"type":"category","data":list(df.index),"axisLabel":{"fontSize":8}},"yAxis":{"type":"value","axisLabel":{"fontSize":9}},"series":[
+                {"name":"需求","type":"line","data":[int(v) for v in df["需求"]],"smooth":True,"symbol":"none","lineStyle":{"width":2,"color":"#1f77b4"}},
+                {"name":"产量","type":"line","data":[int(v) for v in df["产量"]],"smooth":True,"symbol":"none","lineStyle":{"width":2,"color":"#ff7f0e"}},
+            ]}
+            if pv > 0: o["series"].append({"name":"峰值","type":"line","data":[pv]*len(df),"symbol":"none","lineStyle":{"width":2,"color":"#e74c3c","type":"dashed"}})
+            st_echarts(options=o, height="180px", key=f"sc_{id(sch)%10000}_a")
+        st.caption("平日(周三)")
+    with cb:
+        df = _dc("周六")
+        if not df.empty:
+            pv = int(peak_input/2)
+            o = {"tooltip":{"trigger":"axis"},"legend":{"data":["需求","产量","峰值"],"top":0},"grid":{"left":40,"right":5,"top":25,"bottom":25},"xAxis":{"type":"category","data":list(df.index),"axisLabel":{"fontSize":8}},"yAxis":{"type":"value","axisLabel":{"fontSize":9}},"series":[
+                {"name":"需求","type":"line","data":[int(v) for v in df["需求"]],"smooth":True,"symbol":"none","lineStyle":{"width":2,"color":"#1f77b4"}},
+                {"name":"产量","type":"line","data":[int(v) for v in df["产量"]],"smooth":True,"symbol":"none","lineStyle":{"width":2,"color":"#ff7f0e"}},
+            ]}
+            if pv > 0: o["series"].append({"name":"峰值","type":"line","data":[pv]*len(df),"symbol":"none","lineStyle":{"width":2,"color":"#e74c3c","type":"dashed"}})
+            st_echarts(options=o, height="180px", key=f"sc_{id(sch)%10000}_b")
+        st.caption("周末(周六)")
+    df_r = _dc("周三")
+    tc = df_r["产量"].sum() if not df_r.empty else 0
+    td = df_r["需求"].sum() if not df_r.empty else 0
+    u = (td/tc*100) if tc>0 else 0
+    st.markdown("### 产能利用率")
+    a,b,c = st.columns(3)
+    with a: st.metric("产能(日)",f"{tc:.0f}")
+    with b: st.metric("客流(日)",f"{td:.0f}")
+    with c: st.metric("利用率",f"{u:.1f}%")
+
+
 # ─── 生成排班 ─────────────────────────────────────────────────────
 
 if st.button("🔨 生成排班方案", type="primary"):
@@ -339,95 +429,6 @@ if st.button("🔨 生成排班方案", type="primary"):
     else:
         schedule_by_emp = None
         _ALL_SOLUTIONS = []
-    def _render_schedule(sch, sol, label, expanded=True):
-        st.markdown(f"**{label}**")
-        if sol: st.caption(f"得分: {sol.get('objective','?')} | 缺口: {sol.get('gap_total','?')} | 班次种类: {sol.get('shift_types_used','?')}")
-        rest_local = {emp: [d for d in week_days if sch[emp].get(d) is None] for emp in emp_names}
-        st.markdown("### 休息日安排（每人每周1天）")
-        for emp, days in rest_local.items(): st.markdown(f"- **{emp}**：休息 {'、'.join(days)}")
-        ci = False
-        for emp in emp_names:
-            for d in rest_local.get(emp, []):
-                i = week_days.index(d)
-                if (i>0 and week_days[i-1] in rest_local.get(emp,[])) or (i<len(week_days)-1 and week_days[i+1] in rest_local.get(emp,[])):
-                    st.warning(f"连续休息 {emp}"); ci = True
-        if not ci: st.caption("无连续休息")
-        st.markdown("### 员工周工时统计")
-        eh = []
-        for emp in emp_names:
-            th = sum(s.end-s.start for d in week_days for sn in [sch[emp].get(d)] if sn for s in [shift_map.get(sn)] if s)
-            eh.append({"员工":emp, "周工时(h)":round(th,1), "上限":54, "状态":"OK" if th<=54 else "NG"})
-        st.dataframe(pd.DataFrame(eh).set_index("员工"), use_container_width=True)
-        st.markdown("### 每日排班明细表")
-        td = {}
-        for day in week_days:
-            td[day] = []
-            for emp in emp_names:
-                sn = sch[emp].get(day); s = shift_map.get(sn) if sn else None
-                td[day].append(f"{sn}班({_fmt(s.start)}-{_fmt(s.end)})" if s else "休息")
-        st.dataframe(pd.DataFrame(td, index=emp_names), use_container_width=True)
-        cov_gs = int(min(s.start for s in shifts)); cov_ge = int(max(s.end for s in shifts)); cov_r = cov_ge - cov_gs
-        st.markdown("#### 📅 每日班次甘特图")
-        _gc = {"A":"#4caf50","B":"#2196f3","C":"#ff9800"}
-        for day in week_days:
-            # 时间轴标尺
-            time_labels = ""
-            for h in range(cov_gs, cov_ge + 1):
-                p = (h - cov_gs) / cov_r * 100
-                time_labels += f'<span style="position:absolute;left:{p:.0f}%;font-size:8px;color:#888">{h}:00</span>'
-            bars = ""
-            for emp in emp_names:
-                sn = sch[emp].get(day); so = shift_map.get(sn) if sn else None
-                if not so:
-                    bars += f'<div style=display:flex;height:18px><span style=width:30px;font-size:9px>{emp}</span><div style=flex:1;height:14px;background:#eee;border-radius:2px;text-align:center;font-size:8px;color:#999;line-height:14px>休息</div></div>'
-                else:
-                    p = (so.start-cov_gs)/cov_r*100; w = (so.end-so.start)/cov_r*100; c = _gc.get(sn,"#666")
-                    bars += f'<div style=display:flex;height:18px><span style=width:30px;font-size:9px>{emp}</span><div style=flex:1;height:14px;background:#f0f0f0;border-radius:2px;position:relative><div style=position:absolute;left:{p:.0f}%;width:{w:.0f}%;height:100%;background:{c};border-radius:2px;text-align:center;font-size:8px;color:#fff;line-height:14px>{sn}</div></div></div>'
-            st.markdown(f'<div style=font-size:9px;color:#888>{day}</div><div style=position:relative;height:14px;margin:0 0 2px 30px;font-size:0>{time_labels}</div><div>{bars}</div>', unsafe_allow_html=True)
-        st.caption("A:green B:blue C:orange")
-        st.markdown("### 产能拟合曲线")
-        def _dc(dn):
-            slots = sorted(demand_30min.get(dn,{}).keys())
-            sc = {s.name:{t for t in slots if s.start<=int(t.split(":")[0])+int(t.split(":")[1])/60<s.end} for s in shifts}
-            rows = []
-            for t in slots:
-                staff = sum(1 for emp in emp_names if sch[emp].get(dn) and t in sc.get(sch[emp][dn],set()))
-                rows.append({"time":t,"需求":demand_30min.get(dn,{}).get(t,0),"产量":int(staff*productivity/2)})
-            return pd.DataFrame(rows).set_index("time")
-        ca, cb = st.columns(2)
-        with ca:
-            df = _dc("周三")
-            if not df.empty:
-                pv = int(peak_input/2)
-                o = {"tooltip":{"trigger":"axis"},"legend":{"data":["需求","产量","峰值"],"top":0},"grid":{"left":40,"right":5,"top":25,"bottom":25},"xAxis":{"type":"category","data":list(df.index),"axisLabel":{"fontSize":8}},"yAxis":{"type":"value","axisLabel":{"fontSize":9}},"series":[
-                    {"name":"需求","type":"line","data":[int(v) for v in df["需求"]],"smooth":True,"symbol":"none","lineStyle":{"width":2,"color":"#1f77b4"}},
-                    {"name":"产量","type":"line","data":[int(v) for v in df["产量"]],"smooth":True,"symbol":"none","lineStyle":{"width":2,"color":"#ff7f0e"}},
-                ]}
-                if pv > 0: o["series"].append({"name":"峰值","type":"line","data":[pv]*len(df),"symbol":"none","lineStyle":{"width":2,"color":"#e74c3c","type":"dashed"}})
-                st_echarts(options=o, height="180px", key=f"sc_{id(sch)%10000}_a")
-            st.caption("平日(周三)")
-        with cb:
-            df = _dc("周六")
-            if not df.empty:
-                pv = int(peak_input/2)
-                o = {"tooltip":{"trigger":"axis"},"legend":{"data":["需求","产量","峰值"],"top":0},"grid":{"left":40,"right":5,"top":25,"bottom":25},"xAxis":{"type":"category","data":list(df.index),"axisLabel":{"fontSize":8}},"yAxis":{"type":"value","axisLabel":{"fontSize":9}},"series":[
-                    {"name":"需求","type":"line","data":[int(v) for v in df["需求"]],"smooth":True,"symbol":"none","lineStyle":{"width":2,"color":"#1f77b4"}},
-                    {"name":"产量","type":"line","data":[int(v) for v in df["产量"]],"smooth":True,"symbol":"none","lineStyle":{"width":2,"color":"#ff7f0e"}},
-                ]}
-                if pv > 0: o["series"].append({"name":"峰值","type":"line","data":[pv]*len(df),"symbol":"none","lineStyle":{"width":2,"color":"#e74c3c","type":"dashed"}})
-                st_echarts(options=o, height="180px", key=f"sc_{id(sch)%10000}_b")
-            st.caption("周末(周六)")
-        df_r = _dc("周三")
-        tc = df_r["产量"].sum() if not df_r.empty else 0
-        td = df_r["需求"].sum() if not df_r.empty else 0
-        u = (td/tc*100) if tc>0 else 0
-        st.markdown("### 产能利用率")
-        a,b,c = st.columns(3)
-        with a: st.metric("产能(日)",f"{tc:.0f}")
-        with b: st.metric("客流(日)",f"{td:.0f}")
-        with c: st.metric("利用率",f"{u:.1f}%")
-        st.markdown("---")
-
     if not _HAVE_OPTIMIZER or schedule_by_emp is None:
         rest = recommend_rest_days(
             emp_names, 1, min_on_duty=effective_min_staff, week_days=week_days
@@ -453,8 +454,8 @@ if st.button("🔨 生成排班方案", type="primary"):
             for day in week_days:
                 schedule_by_emp[emp][day] = full_schedule[day].get(emp)
 
-    _render_schedule(schedule_by_emp, results[0] if _ALL_SOLUTIONS else None, "✅ 最优方案", expanded=True)
+    _render_schedule(schedule_by_emp, results[0] if _ALL_SOLUTIONS else None, "✅ 最优方案", True, emp_names, week_days, shifts, demand_30min, productivity, peak_input, shift_map)
     for vi, alt_sol in enumerate(_ALL_SOLUTIONS[1:], start=2):
         with st.expander(f"备选方案 #{vi}（得分: {alt_sol.get('objective', '?')}）", expanded=False):
-            _render_schedule(alt_sol["schedule"], alt_sol, f"方案 #{vi}", expanded=False)
+            _render_schedule(alt_sol["schedule"], alt_sol, f"方案 #{vi}", False, emp_names, week_days, shifts, demand_30min, productivity, peak_input, shift_map)
     st.success("✅ 排班生成完成！请前往「排班检查」页面进行验证。")
