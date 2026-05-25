@@ -4,6 +4,7 @@
 
 import streamlit as st
 import pandas as pd
+import calendar
 from scheduler.core import calculate_min_staff, calculate_staffing_requirements
 from scheduler.shifts import calculate_shifts, generate_shift_pool, get_half_hourly_coverage
 from scheduler.rest_days import recommend_rest_days, validate_coverage
@@ -30,6 +31,37 @@ st.markdown("输入日均客流量，自动生成30分钟颗粒度客流分布�
 # 时间格式化辅助：10.5 → "10:30"
 def _fmt(h: float) -> str:
     return f"{int(h):02d}:{int(h % 1 * 60):02d}"
+
+
+def _get_month_weeks(year: int, month: int) -> list[tuple[str, str, list[str]]]:
+    """Return list of (label, date_range, week_days) for a given month.
+
+    Example:
+        [("第1周", "5/4(一)-5/10(日)", ["周一","周二",...,"周日"]),
+         ("第2周", "5/11(一)-5/17(日)", ["周一","周二",...,"周日"]),
+         ...]
+    """
+    first_weekday, num_days = calendar.monthrange(year, month)
+    first_monday = 1 + ((7 - first_weekday) % 7)
+    if first_monday > num_days:
+        return []
+
+    weeks = []
+    current_start = first_monday
+    week_index = 1
+    week_days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+    while current_start <= num_days:
+        current_end = min(current_start + 6, num_days)
+        date_range = f"{month}/{current_start}(一)-{month}/{current_end}(日)"
+        actual_days = current_end - current_start + 1
+        this_week_days = week_days[:actual_days]
+        weeks.append((f"第{week_index}周", date_range, this_week_days))
+        current_start += 7
+        week_index += 1
+
+    return weeks
+
 
 # ─── 从 Supabase / session_state 加载配置 ────────────────────────
 
