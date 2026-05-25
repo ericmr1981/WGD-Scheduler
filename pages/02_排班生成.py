@@ -2,6 +2,7 @@
 排班生成页 — 支持客流分布图（30min颗粒度）+ 每日排班明细表 + 营运参数分析
 """
 
+import io
 import streamlit as st
 import pandas as pd
 import calendar
@@ -61,6 +62,120 @@ def _get_month_weeks(year: int, month: int) -> list[tuple[str, str, list[str]]]:
         week_index += 1
 
     return weeks
+
+
+def _export_to_excel(
+    schedule_by_emp: dict,
+    week_days: list[str],
+    emp_names: list[str],
+    shifts: list,
+    shift_map: dict,
+    all_weekly_results: list,
+    schedule_mode: str,
+    meal_break: int,
+    config: dict | None,
+) -> io.BytesIO:
+    """Generate Excel file in memory and return BytesIO."""
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        # ── Sheet 1: 排班明细 ──────────────────────────────────
+        rows = []
+        if schedule_mode == "monthly" and all_weekly_results:
+            for w in all_weekly_results:
+                label = w["label"]
+                for emp in emp_names:
+                    for d in w["week_days"]:
+                        sn = w["result"]["schedule"][emp].get(d)
+                        s = shift_map.get(sn) if sn else None
+                        rows.append({
+                            "周次": label,
+                            "员工": emp,
+                            "日期": d,
+                            "班次": sn if sn else "休息",
+                            "开始": _fmt(s.start) if s else "",
+                            "结束": _fmt(s.end) if s else "",
+                        })
+        else:
+            for emp in emp_names:
+                for d in week_days:
+                    sn = schedule_by_emp[emp].get(d)
+                    s = shift_map.get(sn) if sn else None
+                    rows.append({
+                        "员工": emp,
+                        "日期": d,
+                        "班次": sn if sn else "休息",
+                        "开始": _fmt(s.start) if s else "",
+                        "结束": _fmt(s.end) if s else "",
+                    })
+        df_detail = pd.DataFrame(rows)
+        df_detail.to_excel(writer, sheet_name="排班明细", index=False)
+
+        # ── Sheet 2: 周工时统计 ────────────────────────────────
+        week_rows = []
+        if schedule_mode == "monthly" and all_weekly_results:
+            for w in all_weekly_results:
+                for emp in emp_names:
+                    th = sum(
+                        s.end - s.start
+                        for d in w["week_days"]
+                        for sn in [w["result"]["schedule"][emp].get(d)]
+                        if sn
+                        for s in [shift_map.get(sn)]
+                        if s
+                    )
+                    week_rows.append({
+                        "周次": w["label"],
+                        "员工": emp,
+                        "周工时(h)": round(th, 1),
+                        "上限(h)": 54,
+                        "状态": "OK" if th <= 54 else "NG",
+                    })
+        else:
+            for emp in emp_names:
+                th = sum(
+                    s.end - s.start
+                    for d in week_days
+                    for sn in [schedule_by_emp[emp].get(d)]
+                    if sn
+                    for s in [shift_map.get(sn)]
+                    if s
+                )
+                week_rows.append({
+                    "员工": emp,
+                    "周工时(h)": round(th, 1),
+                    "上限(h)": 54,
+                    "状态": "OK" if th <= 54 else "NG",
+                })
+        df_week = pd.DataFrame(week_rows)
+        df_week.to_excel(writer, sheet_name="周工时统计", index=False)
+
+        # ── Sheet 3: 月工时统计（仅月排班）────────────────────
+        if schedule_mode == "monthly" and all_weekly_results:
+            meal_hours_per_shift = meal_break / 60
+            month_rows = []
+            for emp in emp_names:
+                total_hours = 0.0
+                total_meals = 0
+                for w in all_weekly_results:
+                    for d in w["week_days"]:
+                        sn = w["result"]["schedule"][emp].get(d)
+                        s = shift_map.get(sn) if sn else None
+                        if s:
+                            total_hours += s.end - s.start
+                            total_meals += 1
+                pure = total_hours - total_meals * meal_hours_per_shift
+                month_rows.append({
+                    "员工": emp,
+                    "月总工时": round(total_hours, 1),
+                    "扣除吃饭(h)": round(pure, 1),
+                    "上限(h)": 208,
+                    "状态": "OK" if pure <= 208 else "NG",
+                })
+            pd.DataFrame(month_rows).to_excel(writer, sheet_name="月工时统计", index=False)
+
+    output.seek(0)
+    return output
 
 
 # ─── 从 Supabase / session_state 加载配置 ────────────────────────
