@@ -510,4 +510,96 @@ if st.button("🔨 生成排班方案", type="primary"):
     for vi, alt_sol in enumerate(_ALL_SOLUTIONS[1:], start=2):
         with st.expander(f"备选方案 #{vi}（得分: {alt_sol.get('objective', '?')}）", expanded=False):
             _render_schedule(alt_sol["schedule"], alt_sol, f"方案 #{vi}", False, emp_names, week_days, shifts, demand_30min, productivity, peak_input, shift_map)
+    # ── 月排班模式 ─────────────────────────────────────────────
+    if schedule_mode == "monthly" and month_weeks:
+        st.markdown("---")
+        st.subheader(f"📅 {selected_month_str} 月排班方案")
+
+        with st.spinner(f"正在生成 {len(month_weeks)} 周排班方案..."):
+            all_weekly_results = []
+            for week_label, week_daterange, week_days_local in month_weeks:
+                with st.status(f"{week_label} ({week_daterange})...", expanded=False) as status:
+                    local_results = optimize_schedule(
+                        emp_names=emp_names,
+                        week_days=week_days_local,
+                        shifts=shifts,
+                        productivity=productivity,
+                        demand_30min={d: demand_30min.get(d, {}) for d in week_days_local},
+                        min_staff=1,
+                        peak_hourly_customers=peak_input,
+                        peak_periods=peak_periods,
+                        num_solutions=1,
+                        time_limit_seconds=10,
+                    )
+                    if local_results and local_results[0]["status"] not in ("INFEASIBLE", "ERROR"):
+                        all_weekly_results.append({
+                            "label": week_label,
+                            "daterange": week_daterange,
+                            "week_days": week_days_local,
+                            "result": local_results[0],
+                        })
+                        status.update(label=f"✅ {week_label} ({week_daterange})", state="complete")
+                    else:
+                        st.error(f"⚠️ {week_label} 排班失败：约束过严")
+                        status.update(label=f"❌ {week_label} 失败", state="error")
+
+        if not all_weekly_results:
+            st.error("⚠️ 所有周排班均生成失败，请检查约束条件。")
+        else:
+            # ── 月工时统计 ────────────────────────────────────
+            meal_break = config.get("meal_break_mins", 30) if config else 30
+            monthly_hours = []
+            for emp in emp_names:
+                total_hours = 0.0
+                for w in all_weekly_results:
+                    sch = w["result"]["schedule"]
+                    for d in w["week_days"]:
+                        sn = sch[emp].get(d)
+                        s = shift_map.get(sn) if sn else None
+                        if s:
+                            total_hours += s.end - s.start
+                meal_hours_per_shift = meal_break / 60
+                total_meals = sum(
+                    1 for w in all_weekly_results
+                    for d in w["week_days"]
+                    if w["result"]["schedule"][emp].get(d) is not None
+                )
+                pure_hours = total_hours - total_meals * meal_hours_per_shift
+                monthly_hours.append({
+                    "员工": emp,
+                    "月总工时": round(total_hours, 1),
+                    "扣除吃饭": round(pure_hours, 1),
+                    "上限(h)": 208,
+                    "状态": "OK" if pure_hours <= 208 else "⚠️ NG",
+                })
+
+            st.markdown("### 员工月工时统计")
+            st.dataframe(pd.DataFrame(monthly_hours).set_index("员工"), use_container_width=True)
+
+            over_limit = [r["员工"] for r in monthly_hours if r["状态"] != "OK"]
+            if over_limit:
+                st.warning(f"⚠️ {'、'.join(over_limit)} 月总工时超过 208h 上限，请调整产能参数或增加员工。")
+            else:
+                st.success("✅ 所有员工月总工时均在 208h 限额内")
+
+            st.markdown("---")
+
+            # ── 各周详情 ─────────────────────────────────────
+            for w in all_weekly_results:
+                week_demand = {d: demand_30min.get(d, {}) for d in w["week_days"]}
+                with st.expander(f"📋 {w['label']} ({w['daterange']}) | 评分: {w['result'].get('objective', '?')}", expanded=(w == all_weekly_results[0])):
+                    _render_schedule(
+                        w["result"]["schedule"],
+                        w["result"],
+                        f"{w['label']} ({w['daterange']})",
+                        True,
+                        emp_names,
+                        w["week_days"],
+                        shifts,
+                        week_demand,
+                        productivity,
+                        peak_input,
+                        shift_map,
+                    )
+
     st.success("✅ 排班生成完成！请前往「排班检查」页面进行验证。")
