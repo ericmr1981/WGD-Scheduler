@@ -719,4 +719,24 @@ if st.button("🔨 生成排班方案", type="primary"):
                         shift_map,
                     )
 
+    # ── 导出 Excel ──────────────────────────────────────────────
+    store_name = config["name"] if config else "门店"
+    if schedule_mode == "monthly" and all_weekly_results:
+        date_tag = selected_month_str
+        excel_data = _export_to_excel(
+            schedule_by_emp, week_days, emp_names, shifts, shift_map,
+            all_weekly_results, schedule_mode, meal_break, config,
+        )
+    else:
+        date_tag = f"{week_days[0]}-{week_days[-1]}"
+        excel_data = _export_to_excel(
+            schedule_by_emp, week_days, emp_names, shifts, shift_map,
+            [], schedule_mode, meal_break, config,
+        )
+    st.download_button(
+        label="📥 导出 Excel",
+        data=excel_data,
+        file_name=f"排班方案_{store_name}_{date_tag}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
     st.success("✅ 排班生成完成！请前往「排班检查」页面进行验证。")
