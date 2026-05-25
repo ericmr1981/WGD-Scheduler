@@ -264,6 +264,26 @@ if peak_periods:
     with cols[1]:
         st.markdown(f"**周末高峰：** {peak_periods.get('weekend_lunch', '11:00-14:00')} | {peak_periods.get('weekend_dinner', '16:00-20:00')}")
 
+# ─── 排班类型选择 ───────────────────────────────────────────
+schedule_mode = st.radio(
+    "📅 排班类型",
+    options=["weekly", "monthly"],
+    format_func=lambda x: {"weekly": "按周排班", "monthly": "按月排班"}[x],
+    horizontal=True,
+    key="schedule_mode",
+)
+
+if schedule_mode == "monthly":
+    from datetime import date
+    today = date.today()
+    month_options = [f"{y}年{m}月" for y in range(today.year, today.year + 2) for m in range(1, 13)]
+    default_idx = month_options.index(f"{today.year}年{today.month}月")
+    selected_month_str = st.selectbox("选择月份", month_options, index=default_idx, key="month_selector")
+    selected_year = int(selected_month_str.split("年")[0])
+    selected_month = int(selected_month_str.split("年")[1].replace("月", ""))
+    month_weeks = _get_month_weeks(selected_year, selected_month)
+    st.caption(f"本月共 {len(month_weeks)} 周")
+
 st.markdown("---")
 
 
