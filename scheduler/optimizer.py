@@ -289,6 +289,7 @@ def optimize_schedule(
     # ── 求解（多次，收集 top N）─────────────────────────────────
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_seconds
+    solver.parameters.num_search_workers = 1  # macOS compat: avoid thread hang
     results: list[dict] = []
 
     for sol_idx in range(num_solutions):

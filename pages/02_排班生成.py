@@ -511,7 +511,9 @@ if st.button("🔨 生成排班方案", type="primary"):
         with st.expander(f"备选方案 #{vi}（得分: {alt_sol.get('objective', '?')}）", expanded=False):
             _render_schedule(alt_sol["schedule"], alt_sol, f"方案 #{vi}", False, emp_names, week_days, shifts, demand_30min, productivity, peak_input, shift_map)
     # ── 月排班模式 ─────────────────────────────────────────────
-    if schedule_mode == "monthly" and month_weeks:
+    if not _HAVE_OPTIMIZER and schedule_mode == "monthly" and month_weeks:
+        st.error("⚠️ 月排班模式需要 CP-SAT 求解器，当前不可用。")
+    elif schedule_mode == "monthly" and month_weeks:
         st.markdown("---")
         st.subheader(f"📅 {selected_month_str} 月排班方案")
 

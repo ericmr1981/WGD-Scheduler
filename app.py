@@ -100,8 +100,10 @@ if "sso_user" not in st.session_state:
             pass
 
     if "sso_user" not in st.session_state or not st.session_state.sso_user:
-        st.error("# 未授权访问\n\n请通过公司 Portal 登录后访问。")
-        st.stop()
+        if token:
+            st.error("# 未授权访问\n\n请通过公司 Portal 登录后访问。")
+            st.stop()
+        # 无 token 时放行（本地开发 / 直接访问）
 
 _sso_url, _sso_key = None, None
 # ========== SSO 认证结束 ==========
