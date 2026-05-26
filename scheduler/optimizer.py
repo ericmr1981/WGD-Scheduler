@@ -42,6 +42,9 @@ def optimize_schedule(
     min_staff: int = 1,
     peak_hourly_customers: int = 0,
     peak_periods: dict[str, str] | None = None,
+    opening_staff_count: int = 1,
+    open_hour: float = 10.0,
+    opening_prep_mins: int = 60,
     num_solutions: int = 3,
     time_limit_seconds: int = 10,
 ) -> list[dict[str, Any]]:
@@ -73,12 +76,21 @@ def optimize_schedule(
     num_emps = len(emp_names)
     num_days = len(week_days)
 
-    # ── 所有 30 分钟时段 ─────────────────────────────────────────
+    # ── 所有 30 分钟时段（含开早准备时段）─────────────────────────
+    prep_start = open_hour - opening_prep_mins / 60
     all_slot_times: list[str] = []
     for day_data in demand_30min.values():
         for t in day_data:
             if t not in all_slot_times:
                 all_slot_times.append(t)
+    # 补充开早准备时段（保证硬约束和软约束能生效）
+    t = prep_start
+    while t < open_hour - 0.01:
+        h, m = int(t), int(t % 1 * 60)
+        slot = f"{h:02d}:{m:02d}"
+        if slot not in all_slot_times:
+            all_slot_times.append(slot)
+        t += 0.5
     all_slot_times.sort()
 
     # 每个班次覆盖哪些时段
@@ -127,14 +139,19 @@ def optimize_schedule(
 
     # ── 硬约束 ──────────────────────────────────────────────────
 
-    # 1. 周六日全员到岗（week_days 须从周一开始）
-    sat_idx = 5
-    sun_idx = 6
-    for e in range(num_emps):
-        if num_days > sat_idx:
+    # 1. 周六日全员到岗（按名称查找，支持不定长周）
+    try:
+        sat_idx = week_days.index("周六")
+        for e in range(num_emps):
             model.Add(is_rest[(e, sat_idx)] == 0)
-        if num_days > sun_idx:
+    except ValueError:
+        pass
+    try:
+        sun_idx = week_days.index("周日")
+        for e in range(num_emps):
             model.Add(is_rest[(e, sun_idx)] == 0)
+    except ValueError:
+        pass
 
     # 2. 无连续休息
     for e in range(num_emps):
@@ -146,7 +163,18 @@ def optimize_schedule(
         for t in all_slot_times:
             model.Add(_staff_on_duty(d, t, is_shift_type, shift_covers, shift_names, num_emps) >= min_staff)
 
-    # 4. 每人每天 ≤ 9h
+    # 4. 开早时段（开门前 prep 分钟）至少 1 人在岗
+    opening_slots = [t for t in all_slot_times
+                     if prep_start <= int(t.split(":")[0]) + int(t.split(":")[1]) / 60 < open_hour]
+    if opening_slots:
+        for d in range(num_days):
+            for s in opening_slots:
+                model.Add(
+                    _staff_on_duty(d, s, is_shift_type, shift_covers, shift_names, num_emps)
+                    >= 1
+                )
+
+    # 5. 每人每天 ≤ 9h
     for e in range(num_emps):
         for d in range(num_days):
             duty_slots = 0
@@ -154,13 +182,16 @@ def optimize_schedule(
                 duty_slots += is_shift_type[n][(e, d)] * len(shift_covers.get(n, set()))
             model.Add(duty_slots <= _MAX_SLOTS_PER_DAY)
 
-    # 5. 每人每周 ≤ 54h（6 个班次 = 休息 1 天）
+    # 6. 每人每周 ≤ 54h（整周工作 6 天休 1 天，短周最多休 1 天）
     for e in range(num_emps):
         work_days = model.NewIntVar(0, num_days, f"work_days_{e}")
         model.Add(work_days == sum(1 - is_rest[(e, d)] for d in range(num_days)))
-        model.Add(work_days == num_days - 1)  # 7 天工作 6 天，休息恰好 1 天
+        if num_days >= 7:
+            model.Add(work_days == num_days - 1)  # 7 天工作 6 天，休 1 天
+        else:
+            model.Add(work_days >= num_days - 1)  # 短周最多休 1 天（可不休）
 
-    # 6. 休息日均匀分布（工作日休息人数方差最小）
+    # 7. 休息日均匀分布（工作日休息人数方差最小）
     weekday_rests: list[cp_model.IntVar] = []
     for d in range(min(5, num_days)):  # 周一到周五
         r = model.NewIntVar(0, num_emps, f"rest_cnt_{d}")
@@ -193,17 +224,6 @@ def optimize_schedule(
 
     total_gap = model.NewIntVar(0, total_demand, "total_gap")
     model.Add(total_gap == sum(gap_vars))
-
-    # ── 软约束：班次种类 ────────────────────────────────────────
-    uses_shift: dict[str, cp_model.IntVar] = {}
-    for n in shift_names:
-        var = model.NewBoolVar(f"uses_{n}")
-        all_uses = [is_shift_type[n][(e, d)] for e in range(num_emps) for d in range(num_days)]
-        model.AddMaxEquality(var, all_uses)
-        uses_shift[n] = var
-
-    shift_type_count = model.NewIntVar(0, len(shift_names), "shift_type_count")
-    model.Add(shift_type_count == sum(uses_shift.values()))
 
     # ── 组合目标 ─────────────────────────────────────────────────
     # ── 软约束：高峰产能缺口（权重 500）──────────────────────────
@@ -260,7 +280,19 @@ def optimize_schedule(
             model.Add(peak_gap_total == sum(peak_gaps))
 
     _REST_FAIRNESS_WEIGHT = 100
-    obj_expr = _GAP_WEIGHT * total_gap + _PEAK_WEIGHT * peak_gap_total + _REST_FAIRNESS_WEIGHT * rest_range + shift_type_count
+
+    # ── 软约束：开早时段人数越少越好 ────────────────────────────
+    opening_staff_vars: list[cp_model.IntVar] = []
+    if opening_slots:
+        for d in range(num_days):
+            for s in opening_slots:
+                opening_staff_vars.append(
+                    _staff_on_duty(d, s, is_shift_type, shift_covers, shift_names, num_emps)
+                )
+    total_opening_staff = model.NewIntVar(0, num_emps * num_days * len(opening_slots or [1]), "total_opening_staff")
+    model.Add(total_opening_staff == sum(opening_staff_vars))
+
+    obj_expr = _GAP_WEIGHT * total_gap + _PEAK_WEIGHT * peak_gap_total + _REST_FAIRNESS_WEIGHT * rest_range + 400 * total_opening_staff
     model.Minimize(obj_expr)
 
     def _extract(slv: cp_model.CpSolver) -> dict:
@@ -284,7 +316,7 @@ def optimize_schedule(
                     slots_report.append({"time": t, "staff": staff_count, "demand": demand, "gap": gap})
             coverage_report.append({"day": day, "slots": slots_report})
         return {"schedule": schedule, "gap_total": slv.Value(total_gap),
-                "shift_types_used": slv.Value(shift_type_count), "coverage_report": coverage_report}
+                "coverage_report": coverage_report}
 
     # ── 求解（多次，收集 top N）─────────────────────────────────
     solver = cp_model.CpSolver()
@@ -307,7 +339,5 @@ def optimize_schedule(
     if results:
         return results
     if status == cp_model.INFEASIBLE:
-        return [{"status": "INFEASIBLE", "schedule": {}, "gap_total": -1,
-                 "shift_types_used": -1, "coverage_report": []}]
-    return [{"status": "ERROR", "schedule": {}, "gap_total": -1,
-             "shift_types_used": -1, "coverage_report": []}]
+        return [{"status": "INFEASIBLE", "schedule": {}, "gap_total": -1, "coverage_report": []}]
+    return [{"status": "ERROR", "schedule": {}, "gap_total": -1, "coverage_report": []}]

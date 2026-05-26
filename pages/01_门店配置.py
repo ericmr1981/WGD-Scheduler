@@ -103,6 +103,7 @@ if stores:
                 "weekend_dinner": s.get("weekend_dinner_peak", "16:00-20:00"),
             },
             "opening_prep_mins": s.get("opening_prep_mins", 60),
+            "opening_staff_count": s.get("opening_staff_count", 1),
             "closing_tasks_mins": s.get("closing_tasks_mins", 60),
             "meal_break_mins": s.get("meal_break_mins", 30),
             "max_meals_per_employee": s.get("max_meals_per_employee", 1),
@@ -153,6 +154,7 @@ default_we_dinner = get_default("weekend_dinner_peak", "16:00-20:00")
 
 # 工时/就餐/在岗参数
 default_opening_prep   = get_default("opening_prep_mins", 60)
+default_opening_staff  = get_default("opening_staff_count", 1)
 default_closing_tasks  = get_default("closing_tasks_mins", 60)
 default_meal_break     = get_default("meal_break_mins", 30)
 default_max_meals      = get_default("max_meals_per_employee", 1)
@@ -243,6 +245,11 @@ with st.expander("⏰ 工时与员工参数", expanded=False):
             value=default_opening_prep, step=5,
             help="开店前准备所需时间"
         )
+        opening_staff = st.number_input(
+            "开早所需人数", min_value=0, max_value=10,
+            value=default_opening_staff,
+            help="开早准备需要安排多少员工提前到店"
+        )
         meal_break = st.number_input(
             "工作餐时间（分钟）", min_value=0, max_value=120,
             value=default_meal_break, step=5,
@@ -291,6 +298,7 @@ if st.button("💾 保存配置", type="primary"):
         "weekend_lunch_peak": weekend_lunch,
         "weekend_dinner_peak": weekend_dinner,
         "opening_prep_mins": opening_prep,
+        "opening_staff_count": opening_staff,
         "closing_tasks_mins": closing_tasks,
         "meal_break_mins": meal_break,
         "max_meals_per_employee": max_meals,

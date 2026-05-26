@@ -35,28 +35,26 @@ def _fmt(h: float) -> str:
 
 
 def _get_month_weeks(year: int, month: int) -> list[tuple[str, str, list[str]]]:
-    """Return list of (label, date_range, week_days) for a given month.
+    """Return list of (label, date_range, week_days) covering the full month.
 
-    Example:
-        [("第1周", "5/4(一)-5/10(日)", ["周一","周二",...,"周日"]),
-         ("第2周", "5/11(一)-5/17(日)", ["周一","周二",...,"周日"]),
-         ...]
+    从每月 1 号开始，到月末最后一天结束，覆盖整月每一天。
     """
     first_weekday, num_days = calendar.monthrange(year, month)
-    first_monday = 1 + ((7 - first_weekday) % 7)
-    if first_monday > num_days:
-        return []
+    _WD = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
     weeks = []
-    current_start = first_monday
+    current_start = 1
     week_index = 1
-    week_days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
     while current_start <= num_days:
         current_end = min(current_start + 6, num_days)
-        date_range = f"{month}/{current_start}(一)-{month}/{current_end}(日)"
+        start_wd_idx = (first_weekday + current_start - 1) % 7
+        end_wd_idx = (first_weekday + current_end - 1) % 7
+        start_label = _WD[start_wd_idx]
+        end_label = _WD[end_wd_idx]
+        date_range = f"{month}/{current_start}({start_label})-{month}/{current_end}({end_label})"
         actual_days = current_end - current_start + 1
-        this_week_days = week_days[:actual_days]
+        this_week_days = [_WD[(first_weekday + current_start - 1 + i) % 7] for i in range(actual_days)]
         weeks.append((f"第{week_index}周", date_range, this_week_days))
         current_start += 7
         week_index += 1
@@ -78,6 +76,24 @@ def _export_to_excel(
     """Generate Excel file in memory and return BytesIO."""
     output = io.BytesIO()
 
+    from datetime import datetime, timedelta
+
+    def _day_actual_date(week_idx: int, day_name: str, weekly_results: list) -> str:
+        """Compute actual date (M/D) for a given day within its month/week."""
+        for w in weekly_results:
+            if w["label"] == week_idx and len(w["week_days"]) >= 7:
+                # Parse start day from daterange like "5/4(一)-5/10(日)"
+                start_part = w["daterange"].split("(")[0]
+                parts = start_part.split("/")
+                m, start_day = int(parts[0]), int(parts[1])
+                day_offset = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"].index(day_name)
+                d = start_day + day_offset
+                return f"{m}/{d}"
+        return ""
+
+    _WEEKDAY_ORDER = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    _MONDAY = datetime.now() - timedelta(days=datetime.now().weekday())
+
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         # ── Sheet 1: 排班明细 ──────────────────────────────────
         rows = []
@@ -85,25 +101,28 @@ def _export_to_excel(
             for w in all_weekly_results:
                 label = w["label"]
                 for emp in emp_names:
-                    for d in w["week_days"]:
+                    for i, d in enumerate(w["week_days"]):
                         sn = w["result"]["schedule"][emp].get(d)
                         s = shift_map.get(sn) if sn else None
                         rows.append({
                             "周次": label,
-                            "员工": emp,
                             "日期": d,
+                            "实际日期": _day_actual_date(label, d, all_weekly_results),
+                            "员工": emp,
                             "班次": sn if sn else "休息",
                             "开始": _fmt(s.start) if s else "",
                             "结束": _fmt(s.end) if s else "",
                         })
         else:
             for emp in emp_names:
-                for d in week_days:
+                for i, d in enumerate(week_days):
                     sn = schedule_by_emp[emp].get(d)
                     s = shift_map.get(sn) if sn else None
+                    date_str = (_MONDAY + timedelta(days=i)).strftime("%m/%d")
                     rows.append({
-                        "员工": emp,
                         "日期": d,
+                        "实际日期": date_str,
+                        "员工": emp,
                         "班次": sn if sn else "休息",
                         "开始": _fmt(s.start) if s else "",
                         "结束": _fmt(s.end) if s else "",
@@ -111,48 +130,56 @@ def _export_to_excel(
         df_detail = pd.DataFrame(rows)
         df_detail.to_excel(writer, sheet_name="排班明细", index=False)
 
-        # ── Sheet 2: 周工时统计 ────────────────────────────────
+        # ── Sheet 2: 周工时统计 ────────────────────────────────────────
+        meal_hours_per_shift = meal_break / 60
         week_rows = []
         if schedule_mode == "monthly" and all_weekly_results:
             for w in all_weekly_results:
                 for emp in emp_names:
-                    th = sum(
-                        s.end - s.start
-                        for d in w["week_days"]
-                        for sn in [w["result"]["schedule"][emp].get(d)]
-                        if sn
-                        for s in [shift_map.get(sn)]
-                        if s
-                    )
+                    th = 0.0
+                    meals = 0
+                    for d in w["week_days"]:
+                        sn = w["result"]["schedule"][emp].get(d)
+                        s = shift_map.get(sn) if sn else None
+                        if s:
+                            th += s.end - s.start
+                            meals += 1
+                    pure = th - meals * meal_hours_per_shift
+                    work_days = sum(1 for d in w["week_days"] if w["result"]["schedule"][emp].get(d) is not None)
                     week_rows.append({
                         "周次": w["label"],
                         "员工": emp,
+                        "工作天数": work_days,
                         "周工时(h)": round(th, 1),
+                        "扣除吃饭(h)": round(pure, 1),
                         "上限(h)": 54,
-                        "状态": "OK" if th <= 54 else "NG",
+                        "状态": "OK" if pure <= 54 else "NG",
                     })
         else:
             for emp in emp_names:
-                th = sum(
-                    s.end - s.start
-                    for d in week_days
-                    for sn in [schedule_by_emp[emp].get(d)]
-                    if sn
-                    for s in [shift_map.get(sn)]
-                    if s
-                )
+                th = 0.0
+                meals = 0
+                for d in week_days:
+                    sn = schedule_by_emp[emp].get(d)
+                    s = shift_map.get(sn) if sn else None
+                    if s:
+                        th += s.end - s.start
+                        meals += 1
+                pure = th - meals * meal_hours_per_shift
+                work_days = sum(1 for d in week_days if schedule_by_emp[emp].get(d) is not None)
                 week_rows.append({
                     "员工": emp,
+                    "工作天数": work_days,
                     "周工时(h)": round(th, 1),
+                    "扣除吃饭(h)": round(pure, 1),
                     "上限(h)": 54,
-                    "状态": "OK" if th <= 54 else "NG",
+                    "状态": "OK" if pure <= 54 else "NG",
                 })
         df_week = pd.DataFrame(week_rows)
         df_week.to_excel(writer, sheet_name="周工时统计", index=False)
 
         # ── Sheet 3: 月工时统计（仅月排班）────────────────────
         if schedule_mode == "monthly" and all_weekly_results:
-            meal_hours_per_shift = meal_break / 60
             month_rows = []
             for emp in emp_names:
                 total_hours = 0.0
@@ -165,12 +192,20 @@ def _export_to_excel(
                             total_hours += s.end - s.start
                             total_meals += 1
                 pure = total_hours - total_meals * meal_hours_per_shift
+                total_days = sum(
+                    1 for w in all_weekly_results for d in w["week_days"]
+                    if w["result"]["schedule"][emp].get(d) is not None
+                )
+                total_month_days = sum(len(w["week_days"]) for w in all_weekly_results)
+                rest_days = total_month_days - total_days
                 month_rows.append({
                     "员工": emp,
+                    "月工作天数": total_days,
+                    "总休息天数": rest_days,
                     "月总工时": round(total_hours, 1),
                     "扣除吃饭(h)": round(pure, 1),
-                    "上限(h)": 208,
-                    "状态": "OK" if pure <= 208 else "NG",
+                    "上限(h)": "218(含10h加班)",
+                    "状态": "OK" if pure <= 218 else "NG",
                 })
             pd.DataFrame(month_rows).to_excel(writer, sheet_name="月工时统计", index=False)
 
@@ -206,6 +241,7 @@ if not config:
                     "weekend_dinner": s.get("weekend_dinner_peak", "16:00-20:00"),
                 },
                 "opening_prep_mins": s.get("opening_prep_mins", 60),
+                "opening_staff_count": s.get("opening_staff_count", 1),
                 "closing_tasks_mins": s.get("closing_tasks_mins", 60),
                 "meal_break_mins": s.get("meal_break_mins", 30),
                 "max_meals_per_employee": s.get("max_meals_per_employee", 1),
@@ -402,9 +438,9 @@ if schedule_mode == "monthly":
 st.markdown("---")
 
 
-def _render_schedule(sch, sol, label, expanded, emp_names, week_days, shifts, demand_30min, productivity, peak_input, shift_map):
+def _render_schedule(sch, sol, label, expanded, emp_names, week_days, shifts, demand_30min, productivity, peak_input, shift_map, key_suffix=0):
     st.markdown(f"**{label}**")
-    if sol: st.caption(f"得分: {sol.get('objective','?')} | 缺口: {sol.get('gap_total','?')} | 班次种类: {sol.get('shift_types_used','?')}")
+    if sol: st.caption(f"得分: {sol.get('objective','?')} | 缺口: {sol.get('gap_total','?')}")
     rest_local = {emp: [d for d in week_days if sch[emp].get(d) is None] for emp in emp_names}
     st.markdown("### 休息日安排（每人每周1天）")
     for emp, days in rest_local.items(): st.markdown(f"- **{emp}**：休息 {'、'.join(days)}")
@@ -419,7 +455,8 @@ def _render_schedule(sch, sol, label, expanded, emp_names, week_days, shifts, de
     eh = []
     for emp in emp_names:
         th = sum(s.end-s.start for d in week_days for sn in [sch[emp].get(d)] if sn for s in [shift_map.get(sn)] if s)
-        eh.append({"员工":emp, "周工时(h)":round(th,1), "上限":54, "状态":"OK" if th<=54 else "NG"})
+        wd = sum(1 for d in week_days if sch[emp].get(d) is not None)
+        eh.append({"员工":emp, "工作天数":wd, "周工时(h)":round(th,1), "上限":54, "状态":"OK" if th<=54 else "NG"})
     st.dataframe(pd.DataFrame(eh).set_index("员工"), use_container_width=True)
     st.markdown("### 每日排班明细表")
     td = {}
@@ -451,6 +488,8 @@ def _render_schedule(sch, sol, label, expanded, emp_names, week_days, shifts, de
     st.markdown("### 产能拟合曲线")
     def _dc(dn):
         slots = sorted(demand_30min.get(dn,{}).keys())
+        if not slots:
+            return pd.DataFrame({"time":[],"需求":[],"产量":[]}).set_index("time")
         sc = {s.name:{t for t in slots if s.start<=int(t.split(":")[0])+int(t.split(":")[1])/60<s.end} for s in shifts}
         rows = []
         for t in slots:
@@ -467,7 +506,7 @@ def _render_schedule(sch, sol, label, expanded, emp_names, week_days, shifts, de
                 {"name":"产量","type":"line","data":[int(v) for v in df["产量"]],"smooth":True,"symbol":"none","lineStyle":{"width":2,"color":"#ff7f0e"}},
             ]}
             if pv > 0: o["series"].append({"name":"峰值","type":"line","data":[pv]*len(df),"symbol":"none","lineStyle":{"width":2,"color":"#e74c3c","type":"dashed"}})
-            st_echarts(options=o, height="180px", key=f"sc_{id(sch)%10000}_a")
+            st_echarts(options=o, height="180px", key=f"sc_{id(sch)%10000}_{key_suffix}_a")
         st.caption("平日(周三)")
     with cb:
         df = _dc("周六")
@@ -478,7 +517,7 @@ def _render_schedule(sch, sol, label, expanded, emp_names, week_days, shifts, de
                 {"name":"产量","type":"line","data":[int(v) for v in df["产量"]],"smooth":True,"symbol":"none","lineStyle":{"width":2,"color":"#ff7f0e"}},
             ]}
             if pv > 0: o["series"].append({"name":"峰值","type":"line","data":[pv]*len(df),"symbol":"none","lineStyle":{"width":2,"color":"#e74c3c","type":"dashed"}})
-            st_echarts(options=o, height="180px", key=f"sc_{id(sch)%10000}_b")
+            st_echarts(options=o, height="180px", key=f"sc_{id(sch)%10000}_{key_suffix}_b")
         st.caption("周末(周六)")
     df_r = _dc("周三")
     tc = df_r["产量"].sum() if not df_r.empty else 0
@@ -498,13 +537,14 @@ if st.button("🔨 生成排班方案", type="primary"):
     open_hour = 10.0
     close_hour = 22.0
     opening_prep = config.get("opening_prep_mins", 60) if config else 60
+    opening_staff_count = config.get("opening_staff_count", 1) if config else 1
     closing_tasks = config.get("closing_tasks_mins", 60) if config else 60
     meal_break = config.get("meal_break_mins", 30) if config else 30
     max_meals = config.get("max_meals_per_employee", 1) if config else 1
     target_hours = config.get("target_hours_per_employee", 8.0) if config else 8.0
     min_on_duty = config.get("min_staff_on_duty", 1) if config else 1
 
-    staffing = calculate_staffing_requirements(open_hour, close_hour, opening_prep, closing_tasks, meal_break, max_meals, target_hours, min_on_duty, min_staff, employees)
+    staffing = calculate_staffing_requirements(open_hour, close_hour, opening_prep, closing_tasks, meal_break, max_meals, target_hours, min_on_duty, min_staff, employees, opening_staff_count)
     effective_min_staff = staffing["effective_min_staff"]
 
     staff_shortage = effective_min_staff > employees
@@ -579,6 +619,9 @@ if st.button("🔨 生成排班方案", type="primary"):
             min_staff=1,
             peak_hourly_customers=peak_input,
             peak_periods=peak_periods,
+            opening_staff_count=opening_staff_count,
+            open_hour=open_hour,
+            opening_prep_mins=opening_prep,
             num_solutions=3,
             time_limit_seconds=10,
         )
@@ -645,6 +688,8 @@ if st.button("🔨 生成排班方案", type="primary"):
                         min_staff=1,
                         peak_hourly_customers=peak_input,
                         peak_periods=peak_periods,
+                        opening_staff_count=opening_staff_count,
+                        open_hour=open_hour,
                         num_solutions=1,
                         time_limit_seconds=10,
                     )
@@ -682,12 +727,16 @@ if st.button("🔨 生成排班方案", type="primary"):
                     if w["result"]["schedule"][emp].get(d) is not None
                 )
                 pure_hours = total_hours - total_meals * meal_hours_per_shift
+                total_month_days = sum(len(w["week_days"]) for w in all_weekly_results)
+                rest_days = total_month_days - total_meals
                 monthly_hours.append({
                     "员工": emp,
+                    "工作天数": total_meals,
+                    "总休息天数": rest_days,
                     "月总工时": round(total_hours, 1),
                     "扣除吃饭": round(pure_hours, 1),
-                    "上限(h)": 208,
-                    "状态": "OK" if pure_hours <= 208 else "⚠️ NG",
+                    "上限(h)": "218(含10h加班)",
+                    "状态": "OK" if pure_hours <= 218 else "⚠️ NG",
                 })
 
             st.markdown("### 员工月工时统计")
@@ -695,14 +744,14 @@ if st.button("🔨 生成排班方案", type="primary"):
 
             over_limit = [r["员工"] for r in monthly_hours if r["状态"] != "OK"]
             if over_limit:
-                st.warning(f"⚠️ {'、'.join(over_limit)} 月总工时超过 208h 上限，请调整产能参数或增加员工。")
+                st.warning(f"⚠️ {'、'.join(over_limit)} 月总工时超过 218h 上限（含10h加班），请调整产能参数或增加员工。")
             else:
-                st.success("✅ 所有员工月总工时均在 208h 限额内")
+                st.success("✅ 所有员工月总工时均在 218h 限额内（含10h加班）")
 
             st.markdown("---")
 
             # ── 各周详情 ─────────────────────────────────────
-            for w in all_weekly_results:
+            for wi, w in enumerate(all_weekly_results):
                 week_demand = {d: demand_30min.get(d, {}) for d in w["week_days"]}
                 with st.expander(f"📋 {w['label']} ({w['daterange']}) | 评分: {w['result'].get('objective', '?')}", expanded=(w == all_weekly_results[0])):
                     _render_schedule(
@@ -717,6 +766,7 @@ if st.button("🔨 生成排班方案", type="primary"):
                         productivity,
                         peak_input,
                         shift_map,
+                        key_suffix=wi,
                     )
 
     # ── 导出 Excel ──────────────────────────────────────────────

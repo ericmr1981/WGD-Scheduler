@@ -107,6 +107,7 @@ def calculate_staffing_requirements(
     min_staff_on_duty: int,
     peak_min_staff: int,
     employee_count: int,
+    opening_staff_count: int = 1,
 ) -> dict:
     """
     根据营运参数计算完整的排班需求分析
@@ -143,8 +144,8 @@ def calculate_staffing_requirements(
 
     total_staff_hours_per_day = employee_count * target_hours_per_employee
 
-    # 开早/打烊占用估算（至少1人做开早或打烊）
-    opening_staff_needed = 1 if opening_prep_mins > 0 else 0
+    # 开早/打烊占用估算
+    opening_staff_needed = opening_staff_count if opening_prep_mins > 0 else 0
     closing_staff_needed = 1 if closing_tasks_mins > 0 else 0
 
     # 简单判断人力是否充足

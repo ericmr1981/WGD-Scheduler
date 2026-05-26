@@ -36,6 +36,7 @@ def _build_config(store: dict) -> dict:
             "weekend_dinner": store.get("weekend_dinner_peak", "16:00-20:00"),
         },
         "opening_prep_mins": store.get("opening_prep_mins", 60),
+        "opening_staff_count": store.get("opening_staff_count", 1),
         "closing_tasks_mins": store.get("closing_tasks_mins", 60),
         "meal_break_mins": store.get("meal_break_mins", 30),
         "max_meals_per_employee": store.get("max_meals_per_employee", 1),
